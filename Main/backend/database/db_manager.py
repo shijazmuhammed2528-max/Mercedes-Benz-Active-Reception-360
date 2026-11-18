@@ -209,6 +209,71 @@ class DatabaseManager:
             logger.error("Get recent failed: %s", e)
             return []
 
+    def delete_session(self, session_id: str, database_dir: str = None) -> bool:
+        """Delete a single session from DB and its image folder from disk."""
+        session = self.get_session(session_id)
+        if not session:
+            return False
+
+        # 1. Delete image folder from disk
+        folder = session.get("folder_path")
+        if folder and os.path.isdir(folder):
+            try:
+                import shutil
+                if database_dir:
+                    abs_db = os.path.abspath(database_dir)
+                    abs_folder = os.path.abspath(folder)
+                    # Protect against deleting root or database_dir itself
+                    if abs_folder.startswith(abs_db) and abs_folder != abs_db:
+                        shutil.rmtree(abs_folder, ignore_errors=True)
+                        logger.info("Deleted session folder: %s", folder)
+                else:
+                    shutil.rmtree(folder, ignore_errors=True)
+                    logger.info("Deleted session folder: %s", folder)
+            except Exception as e:
+                logger.error("Failed to delete folder %s: %s", folder, e)
+
+        # 2. Delete record from database
+        try:
+            conn = self._get_conn()
+            conn.execute("DELETE FROM vehicle_sessions WHERE session_id = ?", (session_id,))
+            conn.commit()
+            conn.close()
+            logger.info("Deleted session %s from database", session_id)
+            return True
+        except Exception as e:
+            logger.error("Failed to delete session %s from DB: %s", session_id, e)
+            return False
+
+    def clear_all_sessions(self, database_dir: str = None) -> int:
+        """Delete all vehicle sessions from DB and all session folders from disk."""
+        try:
+            conn = self._get_conn()
+            count = conn.execute("SELECT COUNT(*) FROM vehicle_sessions").fetchone()[0]
+            conn.execute("DELETE FROM vehicle_sessions")
+            conn.commit()
+            conn.close()
+            logger.info("Cleared %d sessions from database", count)
+        except Exception as e:
+            logger.error("Failed to clear sessions: %s", e)
+            return 0
+
+        # Clean all session folders from database_dir
+        if database_dir and os.path.isdir(database_dir):
+            import shutil
+            abs_db = os.path.abspath(database_dir)
+            for item in os.listdir(database_dir):
+                item_path = os.path.join(database_dir, item)
+                # Only delete session subfolders; keep database file, .gitkeep, etc.
+                if os.path.isdir(item_path):
+                    try:
+                        shutil.rmtree(item_path, ignore_errors=True)
+                        logger.info("Deleted session folder: %s", item_path)
+                    except Exception as e:
+                        logger.error("Failed to delete %s: %s", item_path, e)
+
+        return count
+
     def recover_from_filesystem(self, database_dir: str):
         """Scan database directory and recover sessions from metadata.json files."""
         if not os.path.isdir(database_dir):

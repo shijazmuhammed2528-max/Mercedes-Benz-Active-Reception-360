@@ -35,9 +35,14 @@
 
 <!-- Results -->
 <div class="card">
-    <div class="card-header">
-        <span class="card-title">Search Results</span>
-        <span class="text-muted" id="resultCount">—</span>
+    <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <span class="card-title">Search Results</span>
+            <span class="text-muted" id="resultCount">—</span>
+        </div>
+        <button class="btn btn-sm btn-danger" id="btnClearAll" onclick="confirmClearDatabase()" style="display:none;" title="Permanently delete all vehicle records and captured photos">
+            <i class="fas fa-trash-alt"></i> PURGE ALL RECORDS
+        </button>
     </div>
 
     <div id="resultsContainer">
@@ -49,7 +54,7 @@
                     <th>Date</th>
                     <th>Time</th>
                     <th>Status</th>
-                    <th>Action</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody id="resultsBody"></tbody>

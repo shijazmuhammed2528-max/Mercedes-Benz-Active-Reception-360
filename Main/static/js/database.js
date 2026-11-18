@@ -48,17 +48,20 @@ async function searchDatabase() {
 
         const results = await response.json();
 
+        const btnClearAll = document.getElementById('btnClearAll');
         if (!results || results.length === 0) {
             tableEl.style.display = 'none';
             emptyEl.style.display = 'flex';
             countEl.textContent = '0 records found';
             bodyEl.innerHTML = '';
+            if (btnClearAll) btnClearAll.style.display = 'none';
             return;
         }
 
         countEl.textContent = `${results.length} record${results.length === 1 ? '' : 's'} found`;
         emptyEl.style.display = 'none';
         tableEl.style.display = 'table';
+        if (btnClearAll) btnClearAll.style.display = 'inline-block';
 
         bodyEl.innerHTML = results.map(row => {
             const sid = escapeHtml(row.session_id);
@@ -85,9 +88,14 @@ async function searchDatabase() {
                         <span class="badge ${badgeClass}">${status.toUpperCase()}</span>
                     </td>
                     <td>
-                        <a href="/vehicle/${sid}" class="btn btn-sm btn-primary">
-                            <i class="fas fa-eye"></i> VIEW DETAILS
-                        </a>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <a href="/vehicle/${sid}" class="btn btn-sm btn-primary" title="View details and 360 photos">
+                                <i class="fas fa-eye"></i> VIEW
+                            </a>
+                            <button class="btn btn-sm btn-danger" onclick="deleteSession('${sid}', '${vnum}')" title="Delete record and photos">
+                                <i class="fas fa-trash-alt"></i> DELETE
+                            </button>
+                        </div>
                     </td>
                 </tr>
             `;
@@ -112,6 +120,43 @@ function clearSearch() {
     document.getElementById('searchTimeFrom').value = '';
     document.getElementById('searchTimeTo').value = '';
     searchDatabase();
+}
+
+async function deleteSession(sessionId, vehicleNumber) {
+    if (!confirm(`Are you sure you want to permanently delete vehicle record "${vehicleNumber}"?\n\nThis will remove the session from the database and delete all 4 captured camera photos from disk.`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/vehicle/delete/${sessionId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            searchDatabase();
+        } else {
+            alert('Delete failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Delete error:', e);
+        alert('Failed to delete vehicle record');
+    }
+}
+
+async function confirmClearDatabase() {
+    if (!confirm('DANGER: Are you sure you want to permanently delete ALL vehicle records and captured photos?\n\nThis action cannot be undone.')) {
+        return;
+    }
+    try {
+        const res = await fetch('/api/database/clear-all', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            alert(`Database cleared: ${data.deleted_count} records removed.`);
+            searchDatabase();
+        } else {
+            alert('Clear failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Clear all error:', e);
+        alert('Failed to clear database');
+    }
 }
 
 function escapeHtml(str) {

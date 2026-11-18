@@ -210,12 +210,25 @@ def api_database_search():
 # API — Vehicle Session
 # ═══════════════════════════════════════════════════════════════
 
-@app.route("/api/vehicle/session/<session_id>")
+@app.route("/api/vehicle/session/<session_id>", methods=["GET"])
 def api_vehicle_session(session_id):
     session = db.get_session(session_id)
     if not session:
         return jsonify({"error": "Session not found"}), 404
     return jsonify(session)
+
+@app.route("/api/vehicle/delete/<session_id>", methods=["POST", "DELETE"])
+@app.route("/api/vehicle/session/<session_id>", methods=["DELETE"])
+def api_delete_session(session_id):
+    success = db.delete_session(session_id, database_dir=DATABASE_DIR)
+    if not success:
+        return jsonify({"success": False, "error": "Session not found or delete failed"}), 404
+    return jsonify({"success": True, "session_id": session_id, "message": "Record and captured images deleted successfully"})
+
+@app.route("/api/database/clear-all", methods=["POST", "DELETE"])
+def api_clear_database():
+    count = db.clear_all_sessions(database_dir=DATABASE_DIR)
+    return jsonify({"success": True, "deleted_count": count, "message": f"Successfully deleted {count} records and image folders"})
 
 @app.route("/api/vehicle/image/<session_id>/<camera>")
 def api_vehicle_image(session_id, camera):

@@ -98,8 +98,22 @@
 
 <!-- Storage -->
 <div class="settings-section">
-    <div class="section-title">Storage</div>
+    <div class="section-title">Storage & Database Maintenance</div>
     <div class="settings-grid" id="storageSettings"></div>
+
+    <div style="margin-top:16px; padding:16px 20px; background:rgba(255,50,50,0.06); border:1px solid rgba(255,50,50,0.25); border-radius:6px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+            <div style="color:#ff5555; font-weight:700; font-size:14px; display:flex; align-items:center; gap:8px;">
+                <i class="fas fa-trash-alt"></i> Delete / Clear Vehicle Database
+            </div>
+            <div style="color:var(--text-muted); font-size:12px; margin-top:4px;">
+                Permanently delete all captured vehicle records, photos, and SQLite database entries from local storage.
+            </div>
+        </div>
+        <button class="btn btn-danger" onclick="purgeDatabase()" style="font-weight:700;">
+            <i class="fas fa-trash-alt"></i> PURGE ALL VEHICLE DATA
+        </button>
+    </div>
 </div>
 
 <div class="mt-24">
@@ -199,6 +213,25 @@ async function saveSettings() {
         }
     } catch (e) {
         console.error('Save settings error:', e);
+    }
+}
+
+async function purgeDatabase() {
+    if (!confirm('DANGER: Are you sure you want to permanently delete ALL vehicle records and capture folders?\n\nThis will remove all saved images in D:\\Project Costal star\\Data_base.')) {
+        return;
+    }
+    try {
+        const res = await fetch('/api/database/clear-all', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            alert(`Database cleared: ${data.deleted_count} records and image folders removed.`);
+            loadSettings();
+        } else {
+            alert('Purge failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Purge error:', e);
+        alert('Failed to clear database');
     }
 }
 
