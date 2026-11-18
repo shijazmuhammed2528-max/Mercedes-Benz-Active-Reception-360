@@ -323,3 +323,105 @@ function showCaptureSuccess(result, plateText) {
 function capitalize(s) {
     return s.charAt(0).toUpperCase() + s.slice(1);
 }
+
+// ─── Video Test & Diagnostic Modal ─────────────────────────
+
+async function openLiveVideoTestModal() {
+    const modal = document.getElementById('liveVideoTestModal');
+    const content = document.getElementById('liveVideoTestContent');
+    modal.style.display = 'flex';
+    content.innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted);"><i class="fas fa-spinner fa-spin fa-2x"></i><div style="margin-top:14px; font-size:14px;">Decoding frames and running YOLO vehicle detection across all 4 cameras...</div></div>';
+
+    try {
+        const res = await fetch('/api/videos/test');
+        const data = await res.json();
+        const cams = data.cameras || {};
+
+        let cardsHtml = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px;">';
+
+        for (const [cam, info] of Object.entries(cams)) {
+            const isOk = info.status === 'PASSED';
+            const badgeColor = isOk ? 'var(--success)' : 'var(--error)';
+            const detHtml = info.vehicle_detected 
+                ? `<span style="color:var(--success); font-weight:700;"><i class="fas fa-check-circle"></i> ${info.detection_class.toUpperCase()} (${info.detection_confidence}%)</span>`
+                : `<span style="color:var(--warning);"><i class="fas fa-exclamation-circle"></i> No vehicle detected</span>`;
+
+            cardsHtml += `
+                <div style="background:#181818; border:1px solid ${isOk ? '#2a2a2a' : '#552222'}; border-radius:6px; padding:14px; display:flex; flex-direction:column; justify-content:space-between;">
+                    <div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <span style="font-weight:700; font-size:13px; letter-spacing:0.05em; color:#fff;">CAM ${cam.toUpperCase()} (${cam}.mp4)</span>
+                            <span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:3px; background:${isOk ? 'rgba(0,255,102,0.1)' : 'rgba(255,50,50,0.1)'}; color:${badgeColor}; border:1px solid ${badgeColor};">
+                                ${info.status}
+                            </span>
+                        </div>
+                        ${info.preview_jpeg_b64 ? `
+                            <div style="position:relative; width:100%; height:130px; background:#000; border-radius:4px; overflow:hidden; margin-bottom:10px;">
+                                <img src="data:image/jpeg;base64,${info.preview_jpeg_b64}" style="width:100%; height:100%; object-fit:cover;" alt="${cam}">
+                            </div>
+                        ` : ''}
+                        <div style="font-size:11px; color:#aaa; line-height:1.7;">
+                            <div><strong>Resolution:</strong> ${info.width}x${info.height}</div>
+                            <div><strong>Frame Rate:</strong> ${info.fps} FPS (${info.frame_count} frames)</div>
+                            <div><strong>Duration:</strong> ${info.duration_seconds}s</div>
+                            <div><strong>YOLO Check:</strong> ${detHtml}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:12px;">
+                        <button class="btn btn-sm" onclick="playLiveVideo('${cam}')" style="width:100%; justify-content:center; font-size:11px;">
+                            <i class="fas fa-play"></i> PLAY ${cam.toUpperCase()}.MP4
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        cardsHtml += '</div>';
+
+        content.innerHTML = `
+            <div style="padding:14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <strong style="font-size:13px; color:${data.all_passed ? 'var(--success)' : 'var(--error)'};">
+                        <i class="fas fa-${data.all_passed ? 'check-circle' : 'exclamation-triangle'}"></i> 
+                        ${data.all_passed ? 'ALL 4 PRERECORDED VIDEOS PASSED DIAGNOSTICS & DETECTION' : 'ONE OR MORE VIDEOS FAILED'}
+                    </strong>
+                    <button class="btn btn-sm btn-primary" onclick="openLiveVideoTestModal()" style="padding:4px 10px; font-size:11px;"><i class="fas fa-redo"></i> RE-TEST</button>
+                </div>
+                ${cardsHtml}
+            </div>
+        `;
+    } catch (e) {
+        console.error('Video test error:', e);
+        content.innerHTML = '<div style="color:var(--error); padding:20px;">Diagnostic test failed: ' + e.message + '</div>';
+    }
+}
+
+function closeLiveVideoTestModal() {
+    const modal = document.getElementById('liveVideoTestModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function playLiveVideo(camera) {
+    const modal = document.getElementById('livePlayerModal');
+    const player = document.getElementById('liveVideoTag');
+    const title = document.getElementById('livePlayerTitle');
+
+    title.textContent = `PRERECORDED VIDEO: CAM ${camera.toUpperCase()} (${camera}.mp4)`;
+    player.src = `/api/videos/raw/${camera}?t=${Date.now()}`;
+    modal.style.display = 'flex';
+    player.play().catch(e => console.log('Autoplay prevented:', e));
+}
+
+function closeLiveVideoPlayer() {
+    const modal = document.getElementById('livePlayerModal');
+    const player = document.getElementById('liveVideoTag');
+    player.pause();
+    player.src = '';
+    modal.style.display = 'none';
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeLiveVideoTestModal();
+        closeLiveVideoPlayer();
+    }
+});

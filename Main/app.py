@@ -186,6 +186,34 @@ def api_camera_stream(camera):
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
 
+@app.route("/api/videos/raw/<camera>")
+def api_video_raw(camera):
+    """Stream raw prerecorded MP4 video for browser playback."""
+    if camera not in VIDEO_SOURCES:
+        return "Invalid camera", 404
+    video_path = VIDEO_SOURCES[camera]
+    if not os.path.isfile(video_path):
+        return "Video file not found", 404
+    return send_file(video_path, mimetype='video/mp4')
+
+@app.route("/api/videos/test", methods=["GET", "POST"])
+def api_test_all_videos():
+    """Run full diagnostic test on all 4 prerecorded camera videos."""
+    from backend.services.video_test_service import test_all_videos
+    test_yolo = request.args.get("yolo", "true").lower() == "true"
+    result = test_all_videos(VIDEO_SOURCES, test_yolo=test_yolo)
+    return jsonify(result)
+
+@app.route("/api/videos/test/<camera>", methods=["GET", "POST"])
+def api_test_single_video(camera):
+    """Run diagnostic test on one specific camera video."""
+    if camera not in VIDEO_SOURCES:
+        return jsonify({"error": "Invalid camera"}), 404
+    from backend.services.video_test_service import test_single_video
+    test_yolo = request.args.get("yolo", "true").lower() == "true"
+    result = test_single_video(camera, VIDEO_SOURCES[camera], test_yolo=test_yolo)
+    return jsonify(result)
+
 # ═══════════════════════════════════════════════════════════════
 # API — Database Search
 # ═══════════════════════════════════════════════════════════════
