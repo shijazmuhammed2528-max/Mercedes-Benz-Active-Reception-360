@@ -245,10 +245,28 @@ function showCaptureSuccess(result, plateText) {
     const el = document.getElementById('captureSuccess');
     el.style.display = 'block';
 
-    document.getElementById('successPlate').textContent = plateText || result.vehicle_number || 'UNKNOWN';
+    const plate = plateText || result.vehicle_number || '';
+    const isUnknown = (!plate || plate === 'UNKNOWN');
+    const plateDisplay = isUnknown ? 'REGISTRATION NOT CONFIRMED' : plate;
+    const plateVal = isUnknown ? '' : plate;
+
+    const plateEl = document.getElementById('successPlate');
+    plateEl.textContent = plateDisplay;
+    if (isUnknown) {
+        plateEl.style.color = 'var(--warning)';
+        plateEl.style.fontSize = '20px';
+    } else {
+        plateEl.style.color = 'var(--text-primary)';
+        plateEl.style.fontSize = '28px';
+    }
+
     document.getElementById('successMeta').textContent =
         `${result.capture_date} — ${result.capture_time_12h}`;
-    document.getElementById('plateInput').value = plateText || result.vehicle_number || '';
+    const inputEl = document.getElementById('plateInput');
+    inputEl.value = plateVal;
+    if (isUnknown) {
+        inputEl.placeholder = 'ENTER REGISTRATION (e.g. KL 01 AL 0009)';
+    }
 
     // Preview images
     const preview = document.getElementById('capturePreview');

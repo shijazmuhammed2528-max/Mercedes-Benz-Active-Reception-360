@@ -18,9 +18,11 @@ def init_ocr():
     global _ocr_reader, _ocr_available
     try:
         import easyocr
-        _ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+        import torch
+        use_gpu = torch.cuda.is_available()
+        _ocr_reader = easyocr.Reader(['en'], gpu=use_gpu, verbose=False)
         _ocr_available = True
-        logger.info("EasyOCR initialized")
+        logger.info("EasyOCR initialized (GPU: %s)", use_gpu)
     except ImportError:
         logger.warning("EasyOCR not installed — plate recognition will require manual entry")
         _ocr_available = False
@@ -62,7 +64,7 @@ def recognize_plate(frame: np.ndarray, bbox: list = None) -> dict:
 
         # Combine results and find plate-like patterns
         all_text = " ".join([r[1] for r in results])
-        avg_conf = sum([r[2] for r in results]) / len(results)
+        avg_conf = float(sum([r[2] for r in results]) / len(results))
 
         # Try to find plate pattern (Indian format: XX 00 XX 0000)
         plate_text = normalize_plate(all_text)
