@@ -292,12 +292,154 @@ body {
     cursor: not-allowed;
 }
 
+/* ─── Camera Selector Bar ───────────────────────────────── */
+.camera-selector-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 8px 14px;
+    margin-bottom: 16px;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.cam-bar-left {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.cam-bar-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+}
+
+.cam-bar-pills {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.cam-select-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.cam-select-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: var(--text-primary);
+}
+
+.cam-select-btn.active {
+    background: rgba(0, 192, 240, 0.12);
+    border-color: #00c0f0;
+    color: #00c0f0;
+    box-shadow: 0 0 10px rgba(0, 192, 240, 0.25);
+}
+
+.cam-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    color: inherit;
+}
+
+.cam-status-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #444;
+    transition: background 0.3s, box-shadow 0.3s;
+}
+
+.cam-status-indicator.active {
+    background: var(--success);
+    box-shadow: 0 0 6px var(--success);
+}
+
+.cam-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.source-mode-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+}
+
+.source-select {
+    background: var(--bg-surface-3);
+    color: var(--text-primary);
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    transition: var(--transition);
+}
+
+.source-select:hover, .source-select:focus {
+    border-color: var(--accent-silver);
+}
+
 /* ─── Camera Grid ───────────────────────────────────────── */
 .camera-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
     margin-bottom: 24px;
+    transition: grid-template-columns 0.3s ease;
+}
+
+.camera-grid.single-view {
+    grid-template-columns: 1fr;
+}
+
+.camera-panel.hidden-panel {
+    display: none !important;
+}
+
+.camera-panel.single-focused {
+    border-color: rgba(0, 192, 240, 0.4);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 
 .camera-panel {

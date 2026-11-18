@@ -42,24 +42,45 @@ class CameraStream:
         self.is_stationary = False
         self.confidence = 0.0
 
+    def _is_device_source(self) -> bool:
+        if isinstance(self.video_path, int):
+            return True
+        if isinstance(self.video_path, str) and self.video_path.strip().isdigit():
+            return True
+        return False
+
+    def _get_device_index(self) -> int:
+        if isinstance(self.video_path, int):
+            return self.video_path
+        return int(str(self.video_path).strip())
+
     def open(self) -> bool:
         with self.lock:
-            if not os.path.isfile(self.video_path):
+            is_device = self._is_device_source()
+            if not is_device and not os.path.isfile(str(self.video_path)):
                 logger.error("Video file not found: %s", self.video_path)
                 return False
             try:
-                self.cap = cv2.VideoCapture(self.video_path)
+                if is_device:
+                    dev_idx = self._get_device_index()
+                    backend = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
+                    self.cap = cv2.VideoCapture(dev_idx, backend)
+                else:
+                    self.cap = cv2.VideoCapture(self.video_path)
+
                 if not self.cap.isOpened():
-                    logger.error("Cannot open video: %s", self.video_path)
+                    logger.error("Cannot open stream: %s", self.video_path)
                     return False
                 self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 24.0
+                if self.fps <= 0 or self.fps > 120:
+                    self.fps = 24.0
                 self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) if not is_device else 0
                 self.is_open = True
                 self.frame_number = 0
-                logger.info("Opened %s: %dx%d, %.1f fps, %d frames",
-                            self.name, self.width, self.height, self.fps, self.total_frames)
+                logger.info("Opened %s (source: %s): %dx%d, %.1f fps",
+                            self.name, str(self.video_path), self.width, self.height, self.fps)
                 return True
             except Exception as e:
                 logger.error("Error opening %s: %s", self.video_path, e)
@@ -71,13 +92,14 @@ class CameraStream:
                 return False
             ret, frame = self.cap.read()
             if not ret:
-                # Loop video or mark as ended
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                self.frame_number = 0
+                # Loop video file or mark as ended for device
+                if not self._is_device_source():
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    self.frame_number = 0
                 return False
             self.original_frame = frame.copy()
             self.current_frame = frame
-            self.frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+            self.frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) if not self._is_device_source() else self.frame_number + 1
             # Add to buffer for best-frame selection
             self.frame_buffer.append(self.original_frame.copy())
             return True
@@ -151,12 +173,15 @@ class CameraStream:
             self.original_frame = None
 
     def get_status(self) -> dict:
+        is_dev = self._is_device_source()
         return {
             "name": self.name,
             "label": self.label,
             "is_open": self.is_open,
             "is_playing": self.is_playing,
-            "file_exists": os.path.isfile(self.video_path),
+            "is_device": is_dev,
+            "file_exists": True if is_dev else os.path.isfile(str(self.video_path)),
+            "source": str(self.video_path),
             "frame_number": self.frame_number,
             "total_frames": self.total_frames,
             "fps": self.fps,
@@ -178,6 +203,18 @@ class VideoManager:
         for name, path in video_sources.items():
             label = camera_labels.get(name, name.upper())
             self.cameras[name] = CameraStream(name, path, label)
+
+    def set_sources(self, video_sources: dict):
+        """Update sources dynamically."""
+        for name, path in video_sources.items():
+            if name in self.cameras:
+                cam = self.cameras[name]
+                was_open = cam.is_open
+                if was_open:
+                    cam.release()
+                cam.video_path = path
+                if was_open:
+                    cam.open()
 
     def open_all(self) -> dict:
         results = {}

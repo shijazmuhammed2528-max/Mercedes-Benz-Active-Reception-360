@@ -22,10 +22,17 @@ VIDEO_SOURCES = {
 }
 
 CAMERA_LABELS = {
-    "front": "CAM 01 — FRONT VIEW",
-    "back":  "CAM 02 — REAR VIEW",
-    "left":  "CAM 03 — LEFT VIEW",
-    "right": "CAM 04 — RIGHT VIEW",
+    "front": "CAMERA 0 [FRONT]",
+    "back":  "CAMERA 1 [BACK]",
+    "left":  "CAMERA 2 [LEFT]",
+    "right": "CAMERA 3 [RIGHT]",
+}
+
+CAMERA_DEVICE_MAP = {
+    "front": 0,
+    "back":  1,
+    "left":  2,
+    "right": 3,
 }
 
 # ─── YOLO Configuration ───────────────────────────────────────

@@ -98,6 +98,23 @@ class CaptureController:
                         float(self.config.get("capture_delay_seconds", 1.0)),
                         float(self.config.get("stationary_duration", 2.0)))
 
+    def set_camera_sources(self, mode_or_sources) -> dict:
+        """Switch camera sources between live camera device indices (0,1,2,3) or video files."""
+        from config import VIDEO_SOURCES, CAMERA_DEVICE_MAP
+        with self._lock:
+            if mode_or_sources == "live":
+                sources = dict(CAMERA_DEVICE_MAP)
+            elif mode_or_sources == "video":
+                sources = dict(VIDEO_SOURCES)
+            elif isinstance(mode_or_sources, dict):
+                sources = mode_or_sources
+            else:
+                return {"success": False, "error": f"Unknown source mode: {mode_or_sources}"}
+
+            self.video_manager.set_sources(sources)
+            logger.info("Camera sources switched to %s: %s", mode_or_sources, sources)
+            return {"success": True, "sources": {k: str(v) for k, v in sources.items()}, "mode": mode_or_sources}
+
     def start(self) -> dict:
         """Start a new capture session."""
         if self.is_running:

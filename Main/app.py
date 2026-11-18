@@ -196,6 +196,13 @@ def api_set_plate():
     result = controller.set_plate(plate)
     return jsonify(result)
 
+@app.route("/api/capture/set-source", methods=["POST"])
+def api_set_camera_source():
+    data = request.get_json() or {}
+    mode = data.get("mode", "video")
+    result = controller.set_camera_sources(mode)
+    return jsonify(result)
+
 # ═══════════════════════════════════════════════════════════════
 # API — Video Streaming (MJPEG)
 # ═══════════════════════════════════════════════════════════════

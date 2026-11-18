@@ -7,20 +7,6 @@
     <p class="subtitle">Configure detection, capture, and system parameters</p>
 </div>
 
-<!-- Video Sources -->
-<div class="settings-section">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
-        <div class="section-title" style="margin:0;">Prerecorded Camera Video Sources</div>
-        <button class="btn btn-primary btn-sm" id="btnRunVideoTest" onclick="runVideoDiagnostics()">
-            <i class="fas fa-vial"></i> RUN VIDEO INTEGRITY & YOLO TEST
-        </button>
-    </div>
-    <div class="settings-grid" id="videoSettings"></div>
-
-    <!-- Video Diagnostic Test Results Container -->
-    <div id="videoTestResults" style="display:none; margin-top:16px;"></div>
-</div>
-
 <!-- YOLO -->
 <div class="settings-section">
     <div class="section-title">YOLO Detection Settings</div>
@@ -130,20 +116,6 @@
     </button>
     <span id="saveMsg" class="text-success" style="margin-left:12px;display:none;">Settings saved!</span>
 </div>
-
-<!-- Video Playback Modal -->
-<div class="modal-overlay" id="videoModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:10000; justify-content:center; align-items:center;">
-    <div style="background:#141414; border:1px solid #333; border-radius:8px; max-width:820px; width:92%; padding:20px; box-shadow:0 10px 40px rgba(0,0,0,0.8);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h3 id="videoModalTitle" style="margin:0; font-size:15px; color:#fff; letter-spacing:0.05em; font-weight:700;">RECORDED VIDEO PREVIEW</h3>
-            <button class="btn btn-sm" onclick="closeVideoModal()" style="padding:4px 10px;"><i class="fas fa-times"></i></button>
-        </div>
-        <div style="position:relative; width:100%; background:#000; border-radius:4px; overflow:hidden;">
-            <video id="videoPlayer" controls style="width:100%; max-height:480px; display:block;"></video>
-        </div>
-        <div id="videoModalMeta" style="margin-top:10px; font-size:12px; color:var(--text-muted); display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;"></div>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
@@ -171,22 +143,6 @@ async function loadSettings() {
         document.getElementById('setSharpness').value = cfg.min_sharpness || 30;
         document.getElementById('setCaptureDelay').value = cfg.capture_delay_seconds !== undefined ? cfg.capture_delay_seconds : 1.0;
         document.getElementById('setCooldown').value = cfg.capture_cooldown || 5;
-
-        // Video status
-        const vs = cfg.video_status || {};
-        let vhtml = '';
-        for (const [name, info] of Object.entries(vs)) {
-            const color = info.exists ? 'var(--success)' : 'var(--error)';
-            const status = info.exists ? `OK (${info.size_mb} MB)` : 'MISSING';
-            vhtml += `<div class="setting-item" style="display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <span class="setting-label">${name.toUpperCase()} Video</span>
-                    <span style="color:${color};font-size:11px;font-weight:600;">${status}</span>
-                </div>
-                ${info.exists ? `<button class="btn btn-sm" onclick="playVideo('${name}')" style="padding:4px 10px; font-size:11px;" title="Play ${name}.mp4 in browser"><i class="fas fa-play"></i> PREVIEW</button>` : ''}
-            </div>`;
-        }
-        document.getElementById('videoSettings').innerHTML = vhtml;
 
         // Storage
         const si = cfg.storage_info || {};
@@ -259,106 +215,6 @@ async function purgeDatabase() {
         alert('Failed to clear database');
     }
 }
-
-function playVideo(camera) {
-    const modal = document.getElementById('videoModal');
-    const player = document.getElementById('videoPlayer');
-    const title = document.getElementById('videoModalTitle');
-    const meta = document.getElementById('videoModalMeta');
-
-    title.textContent = `PRERECORDED VIDEO: CAM ${camera.toUpperCase()} (${camera}.mp4)`;
-    meta.innerHTML = `<span>Path: D:\\Project Costal star\\Videos\\${camera}.mp4</span><span>Stream: Direct MP4 Playback</span>`;
-    player.src = `/api/videos/raw/${camera}?t=${Date.now()}`;
-    modal.style.display = 'flex';
-    player.play().catch(e => console.log('Autoplay prevented:', e));
-}
-
-function closeVideoModal() {
-    const modal = document.getElementById('videoModal');
-    const player = document.getElementById('videoPlayer');
-    player.pause();
-    player.src = '';
-    modal.style.display = 'none';
-}
-
-async function runVideoDiagnostics() {
-    const btn = document.getElementById('btnRunVideoTest');
-    const resDiv = document.getElementById('videoTestResults');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> TESTING 4 VIDEOS...';
-    resDiv.style.display = 'block';
-    resDiv.innerHTML = '<div style="padding:24px; text-align:center; color:var(--text-muted);"><i class="fas fa-spinner fa-spin fa-2x"></i><div style="margin-top:10px;">Decoding frames and running YOLO vehicle detection on all 4 videos...</div></div>';
-
-    try {
-        const res = await fetch('/api/videos/test');
-        const data = await res.json();
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-vial"></i> RE-TEST VIDEOS';
-
-        const cams = data.cameras || {};
-        let cardsHtml = '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px;">';
-
-        for (const [cam, info] of Object.entries(cams)) {
-            const isOk = info.status === 'PASSED';
-            const badgeColor = isOk ? 'var(--success)' : 'var(--error)';
-            const detHtml = info.vehicle_detected 
-                ? `<span style="color:var(--success); font-weight:700;"><i class="fas fa-check-circle"></i> ${info.detection_class.toUpperCase()} (${info.detection_confidence}%)</span>`
-                : `<span style="color:var(--warning);"><i class="fas fa-exclamation-circle"></i> No vehicle detected</span>`;
-
-            cardsHtml += `
-                <div style="background:#181818; border:1px solid ${isOk ? '#2a2a2a' : '#552222'}; border-radius:6px; padding:14px; display:flex; flex-direction:column; justify-content:space-between;">
-                    <div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                            <span style="font-weight:700; font-size:13px; letter-spacing:0.05em; color:#fff;">CAM ${cam.toUpperCase()} VIEW</span>
-                            <span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:3px; background:${isOk ? 'rgba(0,255,102,0.1)' : 'rgba(255,50,50,0.1)'}; color:${badgeColor}; border:1px solid ${badgeColor};">
-                                ${info.status}
-                            </span>
-                        </div>
-                        ${info.preview_jpeg_b64 ? `
-                            <div style="position:relative; width:100%; height:130px; background:#000; border-radius:4px; overflow:hidden; margin-bottom:10px;">
-                                <img src="data:image/jpeg;base64,${info.preview_jpeg_b64}" style="width:100%; height:100%; object-fit:cover;" alt="${cam}">
-                            </div>
-                        ` : ''}
-                        <div style="font-size:11px; color:#aaa; line-height:1.7;">
-                            <div><strong>Resolution:</strong> ${info.width}x${info.height}</div>
-                            <div><strong>Frame Rate:</strong> ${info.fps} FPS (${info.frame_count} frames)</div>
-                            <div><strong>Duration:</strong> ${info.duration_seconds}s</div>
-                            <div><strong>YOLO Check:</strong> ${detHtml}</div>
-                        </div>
-                    </div>
-                    <div style="margin-top:12px;">
-                        <button class="btn btn-sm" onclick="playVideo('${cam}')" style="width:100%; justify-content:center; font-size:11px;">
-                            <i class="fas fa-play"></i> PLAY ${cam.toUpperCase()}.MP4
-                        </button>
-                    </div>
-                </div>
-            `;
-        }
-        cardsHtml += '</div>';
-
-        resDiv.innerHTML = `
-            <div style="padding:14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <strong style="font-size:13px; color:${data.all_passed ? 'var(--success)' : 'var(--error)'};">
-                        <i class="fas fa-${data.all_passed ? 'check-circle' : 'exclamation-triangle'}"></i> 
-                        ${data.all_passed ? 'ALL 4 PRERECORDED VIDEOS PASSED DIAGNOSTICS & DETECTION' : 'ONE OR MORE VIDEOS FAILED'}
-                    </strong>
-                    <button class="btn btn-sm" onclick="document.getElementById('videoTestResults').style.display='none'" style="padding:2px 8px; font-size:11px;">HIDE</button>
-                </div>
-                ${cardsHtml}
-            </div>
-        `;
-    } catch (e) {
-        console.error('Video test error:', e);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-vial"></i> RUN VIDEO INTEGRITY TEST';
-        resDiv.innerHTML = '<div style="color:var(--error); padding:10px;">Video diagnostic test failed: ' + e.message + '</div>';
-    }
-}
-
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeVideoModal();
-});
 
 loadSettings();
 </script>
