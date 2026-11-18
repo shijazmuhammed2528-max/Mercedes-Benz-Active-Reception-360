@@ -64,6 +64,7 @@ class CaptureController:
         self._capture_result = None
         self._plate_text = ""
         self._last_capture_time = 0
+        self._ready_start_time = None
 
         # Frame streaming
         self._display_frames = {name: None for name in CAMERA_NAMES}
@@ -109,6 +110,7 @@ class CaptureController:
         self._captured = False
         self._capture_result = None
         self._plate_text = ""
+        self._ready_start_time = None
         self._stop_event.clear()
         self.is_paused = False
         for md in self.motion_detectors.values():
@@ -158,6 +160,7 @@ class CaptureController:
         self.is_paused = False
         self._captured = False
         self._capture_result = None
+        self._ready_start_time = None
         self.video_manager.reset_all()
         for md in self.motion_detectors.values():
             md.reset()
@@ -341,10 +344,13 @@ class CaptureController:
             # Update capture state
             if not self._captured:
                 if not any_detected:
+                    self._ready_start_time = None
                     self.capture_state.set("MONITORING", "Waiting for vehicle...")
                 elif not all_detected:
+                    self._ready_start_time = None
                     self.capture_state.set("VEHICLE_DETECTED", "Vehicle partially visible")
                 elif not all_stationary:
+                    self._ready_start_time = None
                     # Check if any stopping
                     stopping = any(
                         self.video_manager.get_camera(n).motion_state == "STOPPING"
@@ -355,13 +361,25 @@ class CaptureController:
                     else:
                         self.capture_state.set("VEHICLE_MOVING", "Vehicle is moving")
                 elif not all_view_ok:
+                    self._ready_start_time = None
                     self.capture_state.set("CHECKING_VIEWS", "Checking all four views...")
                 else:
-                    # ALL CONDITIONS MET
-                    self.capture_state.set("CAPTURE_READY", "All views ready!")
-                    cooldown = self.config.get("capture_cooldown", 5.0)
-                    if time.time() - self._last_capture_time > cooldown:
-                        self._do_capture()
+                    # ALL CONDITIONS MET (Full vehicle detected, view quality verified, stationary in all 4 views)
+                    now_ts = time.time()
+                    if self._ready_start_time is None:
+                        self._ready_start_time = now_ts
+
+                    delay_needed = float(self.config.get("capture_delay_seconds", 1.0))
+                    elapsed_ready = now_ts - self._ready_start_time
+
+                    if elapsed_ready >= delay_needed:
+                        cooldown = self.config.get("capture_cooldown", 5.0)
+                        if now_ts - self._last_capture_time > cooldown:
+                            self._do_capture()
+                            self._ready_start_time = None
+                    else:
+                        remaining = max(0.1, delay_needed - elapsed_ready)
+                        self.capture_state.set("CAPTURE_READY", f"Full view verified — capturing in {remaining:.1f}s...")
 
             # Frame rate control
             elapsed = time.time() - loop_start

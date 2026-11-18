@@ -37,6 +37,7 @@ YOLO_PROCESS_FPS = 8                 # frames analysed per second per camera
 
 # ─── Capture Configuration ─────────────────────────────────────
 STATIONARY_DURATION = 2.0            # seconds vehicle must be still
+CAPTURE_DELAY_SECONDS = 1.0          # delay (seconds) after full detection before taking picture
 CENTER_MOVE_THRESHOLD = 15.0         # px – max centre drift per frame
 SIZE_CHANGE_THRESHOLD = 0.08         # fractional bbox size change
 VIEW_MARGIN_RATIO = 0.03            # min margin from frame edges (fraction)
@@ -59,6 +60,7 @@ _DEFAULTS = {
     "yolo_process_fps": YOLO_PROCESS_FPS,
     "yolo_inference_size": YOLO_INFERENCE_SIZE,
     "stationary_duration": STATIONARY_DURATION,
+    "capture_delay_seconds": CAPTURE_DELAY_SECONDS,
     "center_move_threshold": CENTER_MOVE_THRESHOLD,
     "size_change_threshold": SIZE_CHANGE_THRESHOLD,
     "view_margin_ratio": VIEW_MARGIN_RATIO,

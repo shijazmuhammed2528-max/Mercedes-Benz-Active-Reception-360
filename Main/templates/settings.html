@@ -81,6 +81,10 @@
             <input type="number" id="setSharpness" step="5" min="0" max="200">
         </div>
         <div class="setting-item">
+            <span class="setting-label">Post-Detection Delay (s)</span>
+            <input type="number" id="setCaptureDelay" step="0.5" min="0" max="10">
+        </div>
+        <div class="setting-item">
             <span class="setting-label">Capture Cooldown (s)</span>
             <input type="number" id="setCooldown" step="1" min="1" max="30">
         </div>
@@ -124,6 +128,7 @@ async function loadSettings() {
         document.getElementById('setSizeThresh').value = cfg.size_change_threshold || 0.08;
         document.getElementById('setMargin').value = cfg.view_margin_ratio || 0.03;
         document.getElementById('setSharpness').value = cfg.min_sharpness || 30;
+        document.getElementById('setCaptureDelay').value = cfg.capture_delay_seconds !== undefined ? cfg.capture_delay_seconds : 1.0;
         document.getElementById('setCooldown').value = cfg.capture_cooldown || 5;
 
         // Video status
@@ -172,6 +177,7 @@ async function saveSettings() {
         size_change_threshold: parseFloat(document.getElementById('setSizeThresh').value),
         view_margin_ratio: parseFloat(document.getElementById('setMargin').value),
         min_sharpness: parseFloat(document.getElementById('setSharpness').value),
+        capture_delay_seconds: parseFloat(document.getElementById('setCaptureDelay').value),
         capture_cooldown: parseFloat(document.getElementById('setCooldown').value),
     };
 

@@ -306,7 +306,7 @@ def api_save_settings():
     # Only update known keys
     allowed = [
         "yolo_model", "yolo_confidence", "yolo_process_fps", "yolo_inference_size",
-        "stationary_duration", "center_move_threshold", "size_change_threshold",
+        "stationary_duration", "capture_delay_seconds", "center_move_threshold", "size_change_threshold",
         "view_margin_ratio", "min_detection_ratio", "min_sharpness",
         "capture_cooldown", "device",
     ]
