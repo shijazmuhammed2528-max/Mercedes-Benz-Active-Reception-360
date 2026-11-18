@@ -36,15 +36,48 @@ def get_image_path(database_dir: str, session_id: str, camera: str,
     return None
 
 
-def get_thumbnail(image_path: str, max_width: int = 300) -> bytes | None:
-    """Generate a thumbnail as JPEG bytes."""
-    import cv2
-    if not image_path or not os.path.isfile(image_path):
+def get_image_bytes(database_dir: str, session_id: str, camera: str, db_manager) -> bytes | None:
+    """
+    Get image bytes: first checks disk file; if missing or on another computer,
+    retrieves directly from the SQL database BLOB storage.
+    """
+    if camera not in ALLOWED_CAMERAS:
         return None
-    try:
+
+    # 1. Try file path on disk
+    path = get_image_path(database_dir, session_id, camera, db_manager)
+    if path and os.path.isfile(path):
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except Exception:
+            pass
+
+    # 2. Fallback to SQL database BLOB storage
+    if db_manager and hasattr(db_manager, "get_session_image_blob"):
+        blob = db_manager.get_session_image_blob(session_id, camera)
+        if blob:
+            return blob
+
+    return None
+
+
+def get_thumbnail(image_path: str = None, image_bytes: bytes = None, max_width: int = 300) -> bytes | None:
+    """Generate a thumbnail as JPEG bytes from either path or raw bytes."""
+    import cv2
+    import numpy as np
+
+    img = None
+    if image_bytes:
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    elif image_path and os.path.isfile(image_path):
         img = cv2.imread(image_path)
-        if img is None:
-            return None
+
+    if img is None:
+        return None
+
+    try:
         h, w = img.shape[:2]
         if w > max_width:
             scale = max_width / w

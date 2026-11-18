@@ -321,34 +321,38 @@ def api_clear_database():
 def api_vehicle_image(session_id, camera):
     if camera not in {"front", "back", "left", "right"}:
         return "Invalid camera", 400
-    from backend.services.image_service import get_image_path
-    path = get_image_path(DATABASE_DIR, session_id, camera, db)
-    if not path:
+    from backend.services.image_service import get_image_bytes
+    img_bytes = get_image_bytes(DATABASE_DIR, session_id, camera, db)
+    if not img_bytes:
         return "Image not found", 404
-    return send_file(path, mimetype='image/jpeg')
+    return Response(img_bytes, mimetype='image/jpeg')
 
 @app.route("/api/vehicle/thumbnail/<session_id>/<camera>")
 def api_vehicle_thumbnail(session_id, camera):
     if camera not in {"front", "back", "left", "right"}:
         return "Invalid camera", 400
-    from backend.services.image_service import get_image_path, get_thumbnail
-    path = get_image_path(DATABASE_DIR, session_id, camera, db)
-    if not path:
+    from backend.services.image_service import get_image_bytes, get_thumbnail
+    img_bytes = get_image_bytes(DATABASE_DIR, session_id, camera, db)
+    if not img_bytes:
         return "Image not found", 404
-    thumb = get_thumbnail(path, max_width=300)
+    thumb = get_thumbnail(image_bytes=img_bytes, max_width=300)
     if not thumb:
-        return send_file(path, mimetype='image/jpeg')
+        return Response(img_bytes, mimetype='image/jpeg')
     return Response(thumb, mimetype='image/jpeg')
 
 @app.route("/api/vehicle/download/<session_id>/<camera>")
 def api_vehicle_download(session_id, camera):
     if camera not in {"front", "back", "left", "right"}:
         return "Invalid camera", 400
-    from backend.services.image_service import get_image_path
-    path = get_image_path(DATABASE_DIR, session_id, camera, db)
-    if not path:
+    from backend.services.image_service import get_image_bytes
+    img_bytes = get_image_bytes(DATABASE_DIR, session_id, camera, db)
+    if not img_bytes:
         return "Image not found", 404
-    return send_file(path, as_attachment=True, download_name=f"{camera}.jpg")
+    return Response(
+        img_bytes,
+        mimetype='image/jpeg',
+        headers={"Content-Disposition": f"attachment; filename={camera}.jpg"}
+    )
 
 @app.route("/api/vehicle/download-zip/<session_id>")
 def api_vehicle_download_zip(session_id):

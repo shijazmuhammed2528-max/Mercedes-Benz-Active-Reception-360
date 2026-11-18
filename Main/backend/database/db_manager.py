@@ -9,6 +9,14 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+_COLUMNS_NO_BLOB = """
+    id, session_id, vehicle_number, vehicle_number_normalized,
+    capture_date, capture_timestamp, capture_time_12h, folder_path,
+    front_image_path, back_image_path, left_image_path, right_image_path,
+    front_confidence, back_confidence, left_confidence, right_confidence,
+    capture_status, created_at
+"""
+
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS vehicle_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,6 +31,10 @@ CREATE TABLE IF NOT EXISTS vehicle_sessions (
     back_image_path TEXT,
     left_image_path TEXT,
     right_image_path TEXT,
+    front_image_blob BLOB,
+    back_image_blob BLOB,
+    left_image_blob BLOB,
+    right_image_blob BLOB,
     front_confidence REAL DEFAULT 0,
     back_confidence REAL DEFAULT 0,
     left_confidence REAL DEFAULT 0,
@@ -56,6 +68,15 @@ class DatabaseManager:
         try:
             conn = self._get_conn()
             conn.executescript(_CREATE_TABLE + _CREATE_INDEX)
+            # Safe schema migration for existing SQLite databases
+            existing_cols = [c[1] for c in conn.execute("PRAGMA table_info(vehicle_sessions)").fetchall()]
+            for blob_col in ["front_image_blob", "back_image_blob", "left_image_blob", "right_image_blob"]:
+                if blob_col not in existing_cols:
+                    try:
+                        conn.execute(f"ALTER TABLE vehicle_sessions ADD COLUMN {blob_col} BLOB")
+                        logger.info("Migrated SQL schema: added %s BLOB column", blob_col)
+                    except Exception as e:
+                        logger.warning("Column migration %s: %s", blob_col, e)
             conn.commit()
             conn.close()
             logger.info("Database initialized: %s", self.db_path)
@@ -64,6 +85,20 @@ class DatabaseManager:
             raise
 
     def insert_session(self, data: dict) -> bool:
+        # Extract binary image data for SQL BLOB storage (from dict or by reading from path)
+        blobs = {}
+        for cam in ["front", "back", "left", "right"]:
+            b = data.get(f"{cam}_image_blob")
+            if b is None:
+                p = data.get(f"{cam}_image_path")
+                if p and os.path.isfile(p):
+                    try:
+                        with open(p, "rb") as f:
+                            b = f.read()
+                    except Exception:
+                        b = None
+            blobs[cam] = sqlite3.Binary(b) if b else None
+
         try:
             conn = self._get_conn()
             conn.execute("""
@@ -72,9 +107,10 @@ class DatabaseManager:
                  capture_date, capture_timestamp, capture_time_12h,
                  folder_path, front_image_path, back_image_path,
                  left_image_path, right_image_path,
+                 front_image_blob, back_image_blob, left_image_blob, right_image_blob,
                  front_confidence, back_confidence, left_confidence, right_confidence,
                  capture_status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 data["session_id"],
                 data.get("vehicle_number", "UNKNOWN"),
@@ -87,6 +123,10 @@ class DatabaseManager:
                 data.get("back_image_path", ""),
                 data.get("left_image_path", ""),
                 data.get("right_image_path", ""),
+                blobs.get("front"),
+                blobs.get("back"),
+                blobs.get("left"),
+                blobs.get("right"),
                 data.get("front_confidence", 0),
                 data.get("back_confidence", 0),
                 data.get("left_confidence", 0),
@@ -96,7 +136,7 @@ class DatabaseManager:
             ))
             conn.commit()
             conn.close()
-            logger.info("Session inserted: %s", data["session_id"])
+            logger.info("Session inserted into SQL (with image BLOBs): %s", data["session_id"])
             return True
         except sqlite3.IntegrityError:
             logger.warning("Duplicate session: %s", data.get("session_id"))
@@ -124,7 +164,7 @@ class DatabaseManager:
     def search_sessions(self, vehicle_number: str = None, date: str = None,
                         time_from: str = None, time_to: str = None,
                         limit: int = 50, offset: int = 0) -> list:
-        query = "SELECT * FROM vehicle_sessions WHERE 1=1"
+        query = f"SELECT {_COLUMNS_NO_BLOB} FROM vehicle_sessions WHERE 1=1"
         params = []
 
         if vehicle_number:
@@ -164,13 +204,30 @@ class DatabaseManager:
         try:
             conn = self._get_conn()
             row = conn.execute(
-                "SELECT * FROM vehicle_sessions WHERE session_id = ?",
+                f"SELECT {_COLUMNS_NO_BLOB} FROM vehicle_sessions WHERE session_id = ?",
                 (session_id,)
             ).fetchone()
             conn.close()
             return dict(row) if row else None
         except Exception as e:
             logger.error("Get session failed: %s", e)
+            return None
+
+    def get_session_image_blob(self, session_id: str, camera: str) -> bytes | None:
+        """Fetch raw binary image data directly from SQL database BLOB storage."""
+        col = f"{camera.lower()}_image_blob"
+        try:
+            conn = self._get_conn()
+            row = conn.execute(
+                f"SELECT {col} FROM vehicle_sessions WHERE session_id = ?",
+                (session_id,)
+            ).fetchone()
+            conn.close()
+            if row and row[0]:
+                return bytes(row[0])
+            return None
+        except Exception as e:
+            logger.error("Failed to fetch image blob for %s/%s: %s", session_id, camera, e)
             return None
 
     def get_stats(self) -> dict:
@@ -200,7 +257,7 @@ class DatabaseManager:
         try:
             conn = self._get_conn()
             rows = conn.execute(
-                "SELECT * FROM vehicle_sessions ORDER BY capture_timestamp DESC LIMIT ?",
+                f"SELECT {_COLUMNS_NO_BLOB} FROM vehicle_sessions ORDER BY capture_timestamp DESC LIMIT ?",
                 (limit,)
             ).fetchall()
             conn.close()
