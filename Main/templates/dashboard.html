@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Active Reception{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>ACTIVE RECEPTION</h1>
+    <p class="subtitle">360° Vehicle Capture System — Automated vehicle inspection image capture and reception monitoring</p>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid" id="statsGrid">
+    <div class="stat-card">
+        <div class="stat-icon"><i class="fas fa-car"></i></div>
+        <div class="stat-label">Total Sessions</div>
+        <div class="stat-value" id="statTotal">0</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon"><i class="fas fa-calendar-day"></i></div>
+        <div class="stat-label">Today</div>
+        <div class="stat-value" id="statToday">0</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+        <div class="stat-label">Successful</div>
+        <div class="stat-value" id="statSuccess">0</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon"><i class="fas fa-database"></i></div>
+        <div class="stat-label">Total Stored</div>
+        <div class="stat-value" id="statStored">0</div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <!-- Recent Captures -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">Recent Vehicle Captures</span>
+            <a href="/database" class="btn btn-sm">View All</a>
+        </div>
+        <div id="recentSessions" class="session-list">
+            <div class="empty-state">
+                <i class="fas fa-car-side"></i>
+                <p class="text-muted">No captures yet</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Status -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title">System Status</span>
+        </div>
+        <div class="status-grid" id="systemStatus">
+            <div class="status-item" id="statusFront">
+                <span class="status-dot" style="background:var(--text-muted)"></span>
+                Front Video
+            </div>
+            <div class="status-item" id="statusBack">
+                <span class="status-dot" style="background:var(--text-muted)"></span>
+                Rear Video
+            </div>
+            <div class="status-item" id="statusLeft">
+                <span class="status-dot" style="background:var(--text-muted)"></span>
+                Left Video
+            </div>
+            <div class="status-item" id="statusRight">
+                <span class="status-dot" style="background:var(--text-muted)"></span>
+                Right Video
+            </div>
+            <div class="status-item" id="statusYolo">
+                <span class="status-dot" style="background:var(--text-muted)"></span>
+                YOLO Engine
+            </div>
+            <div class="status-item" id="statusDb">
+                <span class="status-dot" style="background:var(--text-muted)"></span>
+                Database
+            </div>
+        </div>
+
+        <div class="mt-24">
+            <a href="/capture" class="btn btn-primary btn-lg" style="width:100%;justify-content:center;">
+                <i class="fas fa-video"></i> START NEW CAPTURE
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Settings — Active Reception{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>SETTINGS</h1>
+    <p class="subtitle">Configure detection, capture, and system parameters</p>
+</div>
+
+<!-- Video Sources -->
+<div class="settings-section">
+    <div class="section-title">Video Source Settings</div>
+    <div class="settings-grid" id="videoSettings"></div>
+</div>
+
+<!-- YOLO -->
+<div class="settings-section">
+    <div class="section-title">YOLO Detection Settings</div>
+    <div class="settings-grid">
+        <div class="setting-item">
+            <span class="setting-label">Model</span>
+            <select id="setModel">
+                <option value="yolov8n.pt">YOLOv8 Nano</option>
+                <option value="yolov8s.pt">YOLOv8 Small</option>
+                <option value="yolov8m.pt">YOLOv8 Medium</option>
+            </select>
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">Confidence Threshold</span>
+            <input type="number" id="setConfidence" step="0.05" min="0.1" max="0.95">
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">Processing FPS</span>
+            <input type="number" id="setFps" min="1" max="30">
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">Inference Size</span>
+            <input type="number" id="setInfSize" min="320" max="1280" step="32">
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">Device</span>
+            <select id="setDevice">
+                <option value="auto">Auto</option>
+                <option value="cpu">CPU</option>
+                <option value="cuda">CUDA (GPU)</option>
+            </select>
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">CUDA Available</span>
+            <span id="cudaStatus" class="text-muted">—</span>
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">GPU</span>
+            <span id="gpuName" class="text-muted">—</span>
+        </div>
+    </div>
+</div>
+
+<!-- Capture -->
+<div class="settings-section">
+    <div class="section-title">Capture Settings</div>
+    <div class="settings-grid">
+        <div class="setting-item">
+            <span class="setting-label">Stationary Duration (s)</span>
+            <input type="number" id="setStationaryDur" step="0.5" min="0.5" max="10">
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">Center Move Threshold (px)</span>
+            <input type="number" id="setCenterThresh" step="1" min="1" max="100">
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">Size Change Threshold</span>
+            <input type="number" id="setSizeThresh" step="0.01" min="0.01" max="0.5">
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">View Margin Ratio</span>
+            <input type="number" id="setMargin" step="0.01" min="0" max="0.2">
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">Min Sharpness</span>
+            <input type="number" id="setSharpness" step="5" min="0" max="200">
+        </div>
+        <div class="setting-item">
+            <span class="setting-label">Capture Cooldown (s)</span>
+            <input type="number" id="setCooldown" step="1" min="1" max="30">
+        </div>
+    </div>
+</div>
+
+<!-- Storage -->
+<div class="settings-section">
+    <div class="section-title">Storage</div>
+    <div class="settings-grid" id="storageSettings"></div>
+</div>
+
+<div class="mt-24">
+    <button class="btn btn-primary btn-lg" onclick="saveSettings()">
+        <i class="fas fa-save"></i> SAVE SETTINGS
+    </button>
+    <span id="saveMsg" class="text-success" style="margin-left:12px;display:none;">Settings saved!</span>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadSettings() {
+    try {
+        const res = await fetch('/api/settings');
+        const cfg = await res.json();
+
+        // YOLO
+        document.getElementById('setModel').value = cfg.yolo_model || 'yolov8n.pt';
+        document.getElementById('setConfidence').value = cfg.yolo_confidence || 0.45;
+        document.getElementById('setFps').value = cfg.yolo_process_fps || 8;
+        document.getElementById('setInfSize').value = cfg.yolo_inference_size || 640;
+        document.getElementById('setDevice').value = cfg.device || 'auto';
+        document.getElementById('cudaStatus').textContent = cfg.cuda_available ? 'Yes' : 'No';
+        document.getElementById('cudaStatus').className = cfg.cuda_available ? 'text-success' : 'text-muted';
+        document.getElementById('gpuName').textContent = cfg.gpu_name || 'None';
+
+        // Capture
+        document.getElementById('setStationaryDur').value = cfg.stationary_duration || 2;
+        document.getElementById('setCenterThresh').value = cfg.center_move_threshold || 15;
+        document.getElementById('setSizeThresh').value = cfg.size_change_threshold || 0.08;
+        document.getElementById('setMargin').value = cfg.view_margin_ratio || 0.03;
+        document.getElementById('setSharpness').value = cfg.min_sharpness || 30;
+        document.getElementById('setCooldown').value = cfg.capture_cooldown || 5;
+
+        // Video status
+        const vs = cfg.video_status || {};
+        let vhtml = '';
+        for (const [name, info] of Object.entries(vs)) {
+            const color = info.exists ? 'var(--success)' : 'var(--error)';
+            const status = info.exists ? `OK (${info.size_mb} MB)` : 'MISSING';
+            vhtml += `<div class="setting-item">
+                <span class="setting-label">${name.toUpperCase()} Video</span>
+                <span style="color:${color};font-size:11px;font-weight:600;">${status}</span>
+            </div>`;
+        }
+        document.getElementById('videoSettings').innerHTML = vhtml;
+
+        // Storage
+        const si = cfg.storage_info || {};
+        document.getElementById('storageSettings').innerHTML = `
+            <div class="setting-item">
+                <span class="setting-label">Database Path</span>
+                <span class="text-muted" style="font-size:11px;">${cfg.database_dir || '—'}</span>
+            </div>
+            <div class="setting-item">
+                <span class="setting-label">Storage Used</span>
+                <span class="text-muted">${si.total_size_mb || 0} MB</span>
+            </div>
+            <div class="setting-item">
+                <span class="setting-label">Session Folders</span>
+                <span class="text-muted">${si.folder_count || 0}</span>
+            </div>
+        `;
+    } catch (e) {
+        console.error('Load settings error:', e);
+    }
+}
+
+async function saveSettings() {
+    const data = {
+        yolo_model: document.getElementById('setModel').value,
+        yolo_confidence: parseFloat(document.getElementById('setConfidence').value),
+        yolo_process_fps: parseInt(document.getElementById('setFps').value),
+        yolo_inference_size: parseInt(document.getElementById('setInfSize').value),
+        device: document.getElementById('setDevice').value,
+        stationary_duration: parseFloat(document.getElementById('setStationaryDur').value),
+        center_move_threshold: parseFloat(document.getElementById('setCenterThresh').value),
+        size_change_threshold: parseFloat(document.getElementById('setSizeThresh').value),
+        view_margin_ratio: parseFloat(document.getElementById('setMargin').value),
+        min_sharpness: parseFloat(document.getElementById('setSharpness').value),
+        capture_cooldown: parseFloat(document.getElementById('setCooldown').value),
+    };
+
+    try {
+        const res = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (res.ok) {
+            const msg = document.getElementById('saveMsg');
+            msg.style.display = 'inline';
+            setTimeout(() => msg.style.display = 'none', 3000);
+        }
+    } catch (e) {
+        console.error('Save settings error:', e);
+    }
+}
+
+loadSettings();
+</script>
+{% endblock %}

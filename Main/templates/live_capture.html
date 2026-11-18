@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Live Capture — Active Reception{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>LIVE VEHICLE RECEPTION</h1>
+    <p class="subtitle">Four-camera automated vehicle identification and capture</p>
+</div>
+
+<!-- State Indicator -->
+<div class="state-indicator" id="stateIndicator">
+    <div class="state-dot" id="stateDot"></div>
+    <span class="state-text" id="stateText">INITIALIZING</span>
+</div>
+
+<!-- Camera Grid -->
+<div class="camera-grid">
+    <!-- FRONT -->
+    <div class="camera-panel" id="panelFront">
+        <div class="camera-header">
+            <span class="camera-label">CAM 01 — FRONT VIEW</span>
+            <div class="camera-status">
+                <span class="status-dot" id="dotFront"></span>
+                <span id="statusTextFront">OFFLINE</span>
+            </div>
+        </div>
+        <div class="camera-feed">
+            <img id="feedFront" src="" alt="Front Camera">
+        </div>
+        <div class="camera-info">
+            <span id="motionFront">—</span>
+            <span class="confidence" id="confFront">—</span>
+        </div>
+    </div>
+
+    <!-- REAR -->
+    <div class="camera-panel" id="panelBack">
+        <div class="camera-header">
+            <span class="camera-label">CAM 02 — REAR VIEW</span>
+            <div class="camera-status">
+                <span class="status-dot" id="dotBack"></span>
+                <span id="statusTextBack">OFFLINE</span>
+            </div>
+        </div>
+        <div class="camera-feed">
+            <img id="feedBack" src="" alt="Rear Camera">
+        </div>
+        <div class="camera-info">
+            <span id="motionBack">—</span>
+            <span class="confidence" id="confBack">—</span>
+        </div>
+    </div>
+
+    <!-- LEFT -->
+    <div class="camera-panel" id="panelLeft">
+        <div class="camera-header">
+            <span class="camera-label">CAM 03 — LEFT VIEW</span>
+            <div class="camera-status">
+                <span class="status-dot" id="dotLeft"></span>
+                <span id="statusTextLeft">OFFLINE</span>
+            </div>
+        </div>
+        <div class="camera-feed">
+            <img id="feedLeft" src="" alt="Left Camera">
+        </div>
+        <div class="camera-info">
+            <span id="motionLeft">—</span>
+            <span class="confidence" id="confLeft">—</span>
+        </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="camera-panel" id="panelRight">
+        <div class="camera-header">
+            <span class="camera-label">CAM 04 — RIGHT VIEW</span>
+            <div class="camera-status">
+                <span class="status-dot" id="dotRight"></span>
+                <span id="statusTextRight">OFFLINE</span>
+            </div>
+        </div>
+        <div class="camera-feed">
+            <img id="feedRight" src="" alt="Right Camera">
+        </div>
+        <div class="camera-info">
+            <span id="motionRight">—</span>
+            <span class="confidence" id="confRight">—</span>
+        </div>
+    </div>
+</div>
+
+<!-- Controls -->
+<div class="capture-controls">
+    <button class="btn btn-success btn-lg" id="btnStart" onclick="startCapture()">
+        <i class="fas fa-play"></i> START CAPTURE
+    </button>
+    <button class="btn" id="btnPause" onclick="pauseCapture()" disabled>
+        <i class="fas fa-pause"></i> PAUSE
+    </button>
+    <button class="btn" id="btnResume" onclick="resumeCapture()" disabled>
+        <i class="fas fa-play"></i> RESUME
+    </button>
+    <button class="btn btn-danger" id="btnStop" onclick="stopCapture()" disabled>
+        <i class="fas fa-stop"></i> STOP SESSION
+    </button>
+    <button class="btn btn-warning" id="btnReset" onclick="resetCapture()">
+        <i class="fas fa-undo"></i> RESET
+    </button>
+</div>
+
+<!-- Conditions Checklist -->
+<div class="conditions-grid" id="conditionsGrid">
+    <div class="condition-item" id="condFrontDetected">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        Front vehicle detected
+    </div>
+    <div class="condition-item" id="condBackDetected">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        Rear vehicle detected
+    </div>
+    <div class="condition-item" id="condLeftDetected">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        Left vehicle detected
+    </div>
+    <div class="condition-item" id="condRightDetected">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        Right vehicle detected
+    </div>
+    <div class="condition-item" id="condFrontView">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        Front full view
+    </div>
+    <div class="condition-item" id="condBackView">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        Rear full view
+    </div>
+    <div class="condition-item" id="condLeftView">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        Left full view
+    </div>
+    <div class="condition-item" id="condRightView">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        Right full view
+    </div>
+    <div class="condition-item" id="condStationary">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        Vehicle stationary
+    </div>
+</div>
+
+<!-- Capture Success -->
+<div class="capture-success" id="captureSuccess" style="display:none;">
+    <h2><i class="fas fa-check-circle"></i> CAPTURE SUCCESSFUL</h2>
+    <div class="plate-number" id="successPlate">—</div>
+    <div class="capture-meta" id="successMeta">—</div>
+
+    <!-- Plate Correction -->
+    <div class="plate-input-group">
+        <input type="text" id="plateInput" placeholder="ENTER REGISTRATION" maxlength="20">
+        <button class="btn btn-primary btn-sm" onclick="savePlate()">
+            <i class="fas fa-save"></i> SAVE
+        </button>
+    </div>
+
+    <div class="capture-preview-grid" id="capturePreview"></div>
+
+    <div class="flex-row" style="justify-content:center;">
+        <a id="linkViewDb" href="/database" class="btn btn-primary">
+            <i class="fas fa-database"></i> VIEW IN DATABASE
+        </a>
+        <a id="linkViewSession" href="#" class="btn">
+            <i class="fas fa-external-link-alt"></i> OPEN SESSION
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/capture.js"></script>
+{% endblock %}

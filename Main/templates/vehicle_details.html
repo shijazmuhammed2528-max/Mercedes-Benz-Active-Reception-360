@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Vehicle Details — Active Reception{% endblock %}
+
+{% block content %}
+<div id="vehicleContent">
+    <div class="vehicle-header">
+        <div>
+            <a href="/database" class="btn btn-sm mb-16"><i class="fas fa-arrow-left"></i> BACK TO DATABASE</a>
+            <h1>VEHICLE RECEPTION RECORD</h1>
+        </div>
+        <div class="flex-row">
+            <button class="btn btn-primary" onclick="downloadZip()">
+                <i class="fas fa-download"></i> DOWNLOAD ALL IMAGES
+            </button>
+        </div>
+    </div>
+
+    <!-- Vehicle Info -->
+    <div class="vehicle-info-grid" id="vehicleInfo">
+        <div class="vehicle-info-item">
+            <span class="info-label">Registration Number</span>
+            <span class="info-value" id="infoPlate">—</span>
+        </div>
+        <div class="vehicle-info-item">
+            <span class="info-label">Capture Date</span>
+            <span class="info-value" id="infoDate">—</span>
+        </div>
+        <div class="vehicle-info-item">
+            <span class="info-label">Capture Time</span>
+            <span class="info-value" id="infoTime">—</span>
+        </div>
+        <div class="vehicle-info-item">
+            <span class="info-label">Status</span>
+            <span class="info-value" id="infoStatus">—</span>
+        </div>
+        <div class="vehicle-info-item">
+            <span class="info-label">Session ID</span>
+            <span class="info-value" id="infoSession" style="font-size:12px;">—</span>
+        </div>
+    </div>
+
+    <!-- Images -->
+    <div class="images-grid" id="imagesGrid">
+        <div class="image-card">
+            <div class="image-label">
+                <span>FRONT VIEW</span>
+                <button class="btn btn-sm" onclick="downloadImage('front')">
+                    <i class="fas fa-download"></i>
+                </button>
+            </div>
+            <img id="imgFront" src="" alt="Front View" onclick="openLightbox(this.src)">
+        </div>
+        <div class="image-card">
+            <div class="image-label">
+                <span>REAR VIEW</span>
+                <button class="btn btn-sm" onclick="downloadImage('back')">
+                    <i class="fas fa-download"></i>
+                </button>
+            </div>
+            <img id="imgBack" src="" alt="Rear View" onclick="openLightbox(this.src)">
+        </div>
+        <div class="image-card">
+            <div class="image-label">
+                <span>LEFT SIDE VIEW</span>
+                <button class="btn btn-sm" onclick="downloadImage('left')">
+                    <i class="fas fa-download"></i>
+                </button>
+            </div>
+            <img id="imgLeft" src="" alt="Left View" onclick="openLightbox(this.src)">
+        </div>
+        <div class="image-card">
+            <div class="image-label">
+                <span>RIGHT SIDE VIEW</span>
+                <button class="btn btn-sm" onclick="downloadImage('right')">
+                    <i class="fas fa-download"></i>
+                </button>
+            </div>
+            <img id="imgRight" src="" alt="Right View" onclick="openLightbox(this.src)">
+        </div>
+    </div>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
+    <img id="lightboxImg" src="" alt="Full View">
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SESSION_ID = "{{ session_id }}";
+
+async function loadSession() {
+    try {
+        const res = await fetch(`/api/vehicle/session/${SESSION_ID}`);
+        if (!res.ok) {
+            document.getElementById('vehicleContent').innerHTML =
+                '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>SESSION NOT FOUND</h3></div>';
+            return;
+        }
+        const data = await res.json();
+
+        document.getElementById('infoPlate').textContent = data.vehicle_number || 'UNKNOWN';
+        document.getElementById('infoDate').textContent = data.capture_date || '—';
+        document.getElementById('infoTime').textContent = data.capture_time_12h || '—';
+        document.getElementById('infoSession').textContent = data.session_id || '—';
+
+        const status = data.capture_status || 'unknown';
+        const statusEl = document.getElementById('infoStatus');
+        statusEl.innerHTML = `<span class="badge badge-${status === 'success' ? 'success' : 'warning'}">${status.toUpperCase()}</span>`;
+
+        // Load images
+        document.getElementById('imgFront').src = `/api/vehicle/image/${SESSION_ID}/front`;
+        document.getElementById('imgBack').src = `/api/vehicle/image/${SESSION_ID}/back`;
+        document.getElementById('imgLeft').src = `/api/vehicle/image/${SESSION_ID}/left`;
+        document.getElementById('imgRight').src = `/api/vehicle/image/${SESSION_ID}/right`;
+    } catch (e) {
+        console.error('Load session error:', e);
+    }
+}
+
+function downloadImage(camera) {
+    window.open(`/api/vehicle/download/${SESSION_ID}/${camera}`, '_blank');
+}
+
+function downloadZip() {
+    window.open(`/api/vehicle/download-zip/${SESSION_ID}`, '_blank');
+}
+
+function openLightbox(src) {
+    document.getElementById('lightboxImg').src = src;
+    document.getElementById('lightbox').classList.add('show');
+}
+
+function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('show');
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeLightbox();
+});
+
+loadSession();
+</script>
+{% endblock %}
