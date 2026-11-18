@@ -314,7 +314,22 @@ def api_save_settings():
         if key in data:
             cfg[key] = data[key]
     save_config(cfg)
+    controller.update_config(cfg)
     return jsonify({"success": True, "config": cfg})
+
+@app.route("/api/capture/set-delay", methods=["POST"])
+def api_set_delay():
+    data = request.get_json() or {}
+    try:
+        delay = float(data.get("delay", 1.0))
+        delay = max(0.0, min(10.0, delay))
+        cfg = load_config()
+        cfg["capture_delay_seconds"] = delay
+        save_config(cfg)
+        controller.update_config({"capture_delay_seconds": delay})
+        return jsonify({"success": True, "capture_delay_seconds": delay})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
 # ═══════════════════════════════════════════════════════════════
 # Entry Point

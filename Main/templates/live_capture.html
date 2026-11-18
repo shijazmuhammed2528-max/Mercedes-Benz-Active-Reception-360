@@ -105,6 +105,21 @@
     <button class="btn btn-warning" id="btnReset" onclick="resetCapture()">
         <i class="fas fa-undo"></i> RESET
     </button>
+
+    <div class="delay-control-box" style="display:inline-flex; align-items:center; gap:8px; margin-left:14px; padding:6px 12px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:4px;">
+        <label for="selectCaptureDelay" style="font-size:0.75rem; letter-spacing:0.06em; text-transform:uppercase; color:#aaa; margin:0; display:flex; align-items:center; gap:5px;">
+            <i class="fas fa-clock" style="color:#00c0f0;"></i> Delay:
+        </label>
+        <select id="selectCaptureDelay" onchange="changeCaptureDelay(this.value)" style="background:#111; color:#fff; border:1px solid #444; padding:5px 8px; border-radius:3px; font-size:0.8rem; font-weight:600; cursor:pointer;">
+            <option value="0.0">0.0s (Immediate)</option>
+            <option value="0.5">0.5s</option>
+            <option value="1.0" selected>1.0s (Recommended)</option>
+            <option value="1.5">1.5s</option>
+            <option value="2.0">2.0s</option>
+            <option value="3.0">3.0s</option>
+            <option value="5.0">5.0s</option>
+        </select>
+    </div>
 </div>
 
 <!-- Conditions Checklist -->
@@ -144,6 +159,10 @@
     <div class="condition-item" id="condStationary">
         <div class="check-icon"><i class="fas fa-check"></i></div>
         Vehicle stationary
+    </div>
+    <div class="condition-item" id="condDelayReady">
+        <div class="check-icon"><i class="fas fa-check"></i></div>
+        <span id="delayCountdownLabel">Capture delay verified</span>
     </div>
 </div>
 

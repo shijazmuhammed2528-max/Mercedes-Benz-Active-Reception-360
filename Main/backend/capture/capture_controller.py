@@ -84,6 +84,20 @@ class CaptureController:
         self._yolo_ready = success
         return success
 
+    def update_config(self, new_config: dict):
+        """Update runtime configuration dynamically."""
+        with self._lock:
+            self.config.update(new_config)
+            for md in self.motion_detectors.values():
+                md.center_threshold = float(self.config.get("center_move_threshold", 15.0))
+                md.size_threshold = float(self.config.get("size_change_threshold", 0.08))
+                md.stationary_duration = float(self.config.get("stationary_duration", 2.0))
+            self.view_validator.margin_ratio = float(self.config.get("view_margin_ratio", 0.03))
+            self.view_validator.min_area_ratio = float(self.config.get("min_detection_ratio", 0.05))
+            logger.info("Runtime config updated: capture_delay=%.1fs, stationary=%.1fs",
+                        float(self.config.get("capture_delay_seconds", 1.0)),
+                        float(self.config.get("stationary_duration", 2.0)))
+
     def start(self) -> dict:
         """Start a new capture session."""
         if self.is_running:
@@ -236,6 +250,12 @@ class CaptureController:
                 "motion_state": cam.motion_state if cam else "WAITING",
             }
 
+        delay_needed = float(self.config.get("capture_delay_seconds", 1.0))
+        ready_countdown = None
+        if self._ready_start_time is not None and not self._captured:
+            elapsed = time.time() - self._ready_start_time
+            ready_countdown = max(0.0, round(delay_needed - elapsed, 1))
+
         return {
             "is_running": self.is_running,
             "is_paused": self.is_paused,
@@ -247,6 +267,8 @@ class CaptureController:
             "plate_text": self._plate_text,
             "capture_result": self._capture_result,
             "yolo_ready": self._yolo_ready,
+            "capture_delay_seconds": delay_needed,
+            "ready_countdown": ready_countdown,
         }
 
     def get_display_frame(self, camera: str) -> np.ndarray | None:
@@ -266,6 +288,11 @@ class CaptureController:
 
         while not self._stop_event.is_set():
             loop_start = time.time()
+            process_fps = max(1, int(self.config.get("yolo_process_fps", 8)))
+            frame_interval = 1.0 / process_fps
+            confidence = float(self.config.get("yolo_confidence", 0.45))
+            vehicle_classes = self.config.get("yolo_vehicle_classes", [2, 3, 5, 7])
+            inference_size = int(self.config.get("yolo_inference_size", 640))
 
             if self.is_paused:
                 time.sleep(0.1)

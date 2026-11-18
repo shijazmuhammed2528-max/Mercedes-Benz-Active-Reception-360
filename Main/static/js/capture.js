@@ -10,6 +10,32 @@ const CAM_LABELS = {
 
 // ─── Capture Controls ──────────────────────────────────────
 
+async function changeCaptureDelay(val) {
+    const delay = parseFloat(val);
+    try {
+        const res = await fetch('/api/capture/set-delay', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ delay })
+        });
+        const data = await res.json();
+        console.log('Capture delay updated:', data.capture_delay_seconds);
+    } catch (e) {
+        console.error('Failed to update capture delay:', e);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        const res = await fetch('/api/settings');
+        const cfg = await res.json();
+        if (cfg.capture_delay_seconds !== undefined) {
+            const sel = document.getElementById('selectCaptureDelay');
+            if (sel) sel.value = parseFloat(cfg.capture_delay_seconds).toFixed(1);
+        }
+    } catch (e) {}
+});
+
 async function startCapture() {
     try {
         document.getElementById('btnStart').disabled = true;
@@ -185,6 +211,21 @@ async function pollStatus() {
         // Stationary condition (all cameras)
         const allStationary = CAMERAS.every(cam => (conds[cam] || {}).stationary);
         updateCondition('condStationary', allStationary);
+
+        // Delay condition / countdown
+        const delayLabel = document.getElementById('delayCountdownLabel');
+        if (data.ready_countdown !== null && data.ready_countdown !== undefined) {
+            updateCondition('condDelayReady', true);
+            if (delayLabel) {
+                delayLabel.textContent = `Capturing in ${data.ready_countdown.toFixed(1)}s...`;
+            }
+        } else if (data.captured) {
+            updateCondition('condDelayReady', true);
+            if (delayLabel) delayLabel.textContent = 'Capture complete';
+        } else {
+            updateCondition('condDelayReady', false);
+            if (delayLabel) delayLabel.textContent = 'Capture delay verified';
+        }
 
         // Capture success
         if (data.captured && data.capture_result) {
