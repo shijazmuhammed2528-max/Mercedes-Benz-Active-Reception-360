@@ -1,6 +1,13 @@
-// Vehicle Image Upload & Analysis JavaScript — Mercedes-Benz Active Reception
+// Vehicle Multi-Media Upload & Analysis JavaScript — Mercedes-Benz Active Reception
 
-let currentSelectedFile = null;
+let selectedFilesList = []; // Array of { file: File, cameraView: string }
+
+const CAM_VIEWS = [
+    { id: 'front', label: 'CAM 01 — FRONT VIEW' },
+    { id: 'back', label: 'CAM 02 — REAR VIEW' },
+    { id: 'left', label: 'CAM 03 — LEFT SIDE VIEW' },
+    { id: 'right', label: 'CAM 04 — RIGHT SIDE VIEW' }
+];
 
 document.addEventListener('DOMContentLoaded', () => {
     const dropZone = document.getElementById('dropZone');
@@ -8,7 +15,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!dropZone || !fileInput) return;
 
-    // Drag and drop events
     ['dragenter', 'dragover'].forEach(eventName => {
         dropZone.addEventListener(eventName, (e) => {
             e.preventDefault();
@@ -31,65 +37,155 @@ document.addEventListener('DOMContentLoaded', () => {
         const dt = e.dataTransfer;
         const files = dt.files;
         if (files && files.length > 0) {
-            handleFile(files[0]);
+            handleIncomingFiles(files);
         }
     });
 
     fileInput.addEventListener('change', (e) => {
         if (fileInput.files && fileInput.files.length > 0) {
-            handleFile(fileInput.files[0]);
+            handleIncomingFiles(fileInput.files);
         }
     });
 });
 
-function handleFile(file) {
-    if (!file.type.startsWith('image/')) {
-        alert('Please select an image file (JPG, PNG, WEBP).');
+function handleIncomingFiles(fileList) {
+    const newFiles = Array.from(fileList);
+    const validMedia = newFiles.filter(f => f.type.startsWith('image/') || f.type.startsWith('video/') || isMediaExtension(f.name));
+
+    if (validMedia.length === 0) {
+        alert('Please select valid vehicle photo or video files (JPG, PNG, WEBP, MP4, MOV, AVI).');
         return;
     }
 
-    currentSelectedFile = file;
+    // Combine with existing up to maximum 4
+    for (const f of validMedia) {
+        if (selectedFilesList.length >= 4) break;
+        // Avoid adding duplicate filename
+        if (!selectedFilesList.some(item => item.file.name === f.name && item.file.size === f.size)) {
+            const defaultView = guessViewFromFilename(f.name, selectedFilesList.map(x => x.cameraView));
+            selectedFilesList.push({
+                file: f,
+                cameraView: defaultView
+            });
+        }
+    }
 
-    // Show preview & file info
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        document.getElementById('localPreviewImg').src = e.target.result;
-        document.getElementById('selectedFileName').textContent = file.name;
-        document.getElementById('selectedFileSize').textContent = formatBytes(file.size);
-
-        document.getElementById('dropPrompt').style.display = 'none';
-        document.getElementById('fileSelectedInfo').style.display = 'block';
-        document.getElementById('btnAnalyze').disabled = false;
-    };
-    reader.readAsDataURL(file);
+    renderSelectedFiles();
 }
 
-function clearSelectedFile(e) {
-    if (e) e.stopPropagation();
-    currentSelectedFile = null;
+function guessViewFromFilename(filename, alreadyUsed) {
+    const fn = filename.toLowerCase();
+    const views = ['front', 'back', 'left', 'right'];
+
+    if ((fn.includes('front')) && !alreadyUsed.includes('front')) return 'front';
+    if ((fn.includes('back') || fn.includes('rear')) && !alreadyUsed.includes('back')) return 'back';
+    if ((fn.includes('left')) && !alreadyUsed.includes('left')) return 'left';
+    if ((fn.includes('right')) && !alreadyUsed.includes('right')) return 'right';
+
+    // Fallback to first available unused view
+    for (const v of views) {
+        if (!alreadyUsed.includes(v)) return v;
+    }
+    return 'front';
+}
+
+function isMediaExtension(name) {
+    const lower = name.toLowerCase();
+    return ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.jpg', '.jpeg', '.png', '.webp'].some(ext => lower.endsWith(ext));
+}
+
+function renderSelectedFiles() {
+    const section = document.getElementById('selectedFilesSection');
+    const container = document.getElementById('selectedFilesContainer');
+    const countBadge = document.getElementById('fileCountBadge');
+    const btnAnalyze = document.getElementById('btnAnalyze');
+
+    countBadge.textContent = selectedFilesList.length;
+
+    if (selectedFilesList.length === 0) {
+        section.style.display = 'none';
+        btnAnalyze.disabled = true;
+        container.innerHTML = '';
+        return;
+    }
+
+    section.style.display = 'block';
+    btnAnalyze.disabled = false;
+
+    container.innerHTML = selectedFilesList.map((item, index) => {
+        const isVid = item.file.type.startsWith('video/') || ['.mp4', '.mov', '.avi', '.mkv'].some(ext => item.file.name.toLowerCase().endsWith(ext));
+        const iconClass = isVid ? 'fa-video' : 'fa-image';
+        const tagText = isVid ? 'VIDEO' : 'PHOTO';
+        const tagBg = isVid ? 'rgba(77, 166, 255, 0.15)' : 'rgba(0, 200, 83, 0.15)';
+        const tagColor = isVid ? '#4da6ff' : '#00c853';
+
+        const optionsHtml = CAM_VIEWS.map(v => 
+            `<option value="${v.id}" ${item.cameraView === v.id ? 'selected' : ''}>${v.label}</option>`
+        ).join('');
+
+        return `
+            <div style="background:#181818; border:1px solid #2a2a2a; border-radius:6px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
+                    <i class="fas ${iconClass}" style="color:${tagColor}; font-size:16px;"></i>
+                    <div style="min-width:0; flex:1;">
+                        <div style="font-weight:600; font-size:12px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.file.name}">
+                            ${item.file.name}
+                        </div>
+                        <div style="font-size:11px; color:#888; display:flex; gap:8px; margin-top:2px;">
+                            <span>${formatBytes(item.file.size)}</span>
+                            <span style="background:${tagBg}; color:${tagColor}; padding:1px 6px; border-radius:2px; font-weight:700; font-size:9px;">${tagText}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <select onchange="changeItemView(${index}, this.value)" style="background:#111; color:#fff; border:1px solid #444; padding:5px 8px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;">
+                        ${optionsHtml}
+                    </select>
+                    <button type="button" class="btn btn-sm" onclick="removeFileItem(${index})" style="padding:4px 8px; color:#ff5555;" title="Remove this file">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function changeItemView(index, newView) {
+    if (selectedFilesList[index]) {
+        selectedFilesList[index].cameraView = newView;
+    }
+}
+
+function removeFileItem(index) {
+    selectedFilesList.splice(index, 1);
+    renderSelectedFiles();
+}
+
+function clearAllFiles() {
+    selectedFilesList = [];
     document.getElementById('fileInput').value = '';
-    document.getElementById('localPreviewImg').src = '';
-    document.getElementById('dropPrompt').style.display = 'block';
-    document.getElementById('fileSelectedInfo').style.display = 'none';
-    document.getElementById('btnAnalyze').disabled = true;
+    renderSelectedFiles();
     document.getElementById('resultsCard').style.display = 'none';
 }
 
 async function uploadAndAnalyze() {
-    if (!currentSelectedFile) return;
+    if (selectedFilesList.length === 0) return;
 
     const btn = document.getElementById('btnAnalyze');
     const resultsCard = document.getElementById('resultsCard');
-    const cameraView = document.getElementById('selectView').value;
     const saveToDb = document.getElementById('checkSaveDb').checked;
     const plateOverride = document.getElementById('plateOverride').value.trim();
 
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> RUNNING YOLO &amp; OCR ANALYSIS...';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> EXTRACTING FRAMES &amp; RUNNING YOLO/OCR...';
 
     const formData = new FormData();
-    formData.append('file', currentSelectedFile);
-    formData.append('camera_view', cameraView);
+    selectedFilesList.forEach((item) => {
+        // Send under the specific camera slot: front, back, left, right
+        formData.append(item.cameraView, item.file);
+    });
+
     formData.append('save_to_database', saveToDb ? 'true' : 'false');
     if (plateOverride) {
         formData.append('vehicle_number', plateOverride);
@@ -103,69 +199,94 @@ async function uploadAndAnalyze() {
 
         const data = await response.json();
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-microchip"></i> RE-ANALYZE &amp; STORE';
+        btn.innerHTML = '<i class="fas fa-microchip"></i> RE-ANALYZE ALL VIEWS';
 
         if (!data.success) {
-            alert('Analysis error: ' + (data.error || 'Failed to process vehicle image'));
+            alert('Analysis error: ' + (data.error || 'Failed to process vehicle media'));
             return;
         }
 
         // Render Results
         resultsCard.style.display = 'block';
 
-        // Annotated Image with green YOLO bounding box
-        if (data.preview_b64) {
-            document.getElementById('annotatedImg').src = 'data:image/jpeg;base64,' + data.preview_b64;
-        }
-
-        // Detected Class
-        const det = data.detection || {};
-        const detClass = (det.class_name || 'Vehicle').toUpperCase();
-        document.getElementById('resClass').textContent = data.vehicle_detected ? detClass : 'No Vehicle Detected';
-
-        // Confidence
-        const confPercent = det.confidence ? `${(det.confidence * 100).toFixed(1)}%` : '—';
-        document.getElementById('resConf').textContent = confPercent;
-
-        // Plate
+        // Plate Banner
         const plate = data.plate_text || 'UNKNOWN';
         const plateEl = document.getElementById('resPlate');
         plateEl.textContent = plate;
         plateEl.style.color = (plate === 'UNKNOWN') ? 'var(--warning)' : 'var(--success)';
 
-        // Sharpness & Resolution
-        document.getElementById('resSharpness').textContent = `${data.sharpness} ${data.sharpness >= 30 ? '(Sharp)' : '(Low)'}`;
-        document.getElementById('resResolution').textContent = `${data.width} × ${data.height} px`;
+        document.getElementById('resMetaRight').innerHTML = `
+            <div><strong>Total Files:</strong> ${data.total_files}</div>
+            <div><strong>Status:</strong> ${data.saved ? '<span style="color:var(--success)">Stored in Data_base</span>' : 'Analysis Only'}</div>
+        `;
 
-        // DB Status & Action Links
-        const dbStatusEl = document.getElementById('resDbStatus');
+        // Render 4-Camera Grid (2x2)
+        const grid = document.getElementById('fourCamResultsGrid');
+        const cams = data.cameras || {};
+        const camOrder = ['front', 'back', 'left', 'right'];
+        const camLabels = {
+            front: 'CAM 01 — FRONT VIEW',
+            back: 'CAM 02 — REAR VIEW',
+            left: 'CAM 03 — LEFT SIDE VIEW',
+            right: 'CAM 04 — RIGHT SIDE VIEW'
+        };
+
+        grid.innerHTML = camOrder.map(c => {
+            const info = cams[c] || {};
+            const det = info.detection || {};
+            const isDetected = info.vehicle_detected;
+            const detBadge = isDetected 
+                ? `<span style="color:var(--success); font-weight:700;"><i class="fas fa-check-circle"></i> ${(det.class_name || 'CAR').toUpperCase()} (${Math.round(det.confidence * 100)}%)</span>`
+                : `<span style="color:var(--text-muted);"><i class="fas fa-search"></i> Searching</span>`;
+
+            const formatTag = info.is_video ? `VIDEO (${info.duration_seconds}s)` : 'PHOTO';
+
+            return `
+                <div style="background:#141414; border:1px solid #2a2a2a; border-radius:6px; overflow:hidden;">
+                    <div style="padding:8px 12px; background:#1b1b1b; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #2a2a2a;">
+                        <span style="font-size:11px; font-weight:700; color:#fff; letter-spacing:0.05em;">${camLabels[c]}</span>
+                        <span style="font-size:9px; font-weight:700; background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:3px; color:#aaa;">${formatTag}</span>
+                    </div>
+                    <div style="position:relative; width:100%; height:150px; background:#000;">
+                        ${info.preview_b64 ? `
+                            <img src="data:image/jpeg;base64,${info.preview_b64}" style="width:100%; height:100%; object-fit:cover;" alt="${c}">
+                        ` : `
+                            <div style="height:100%; display:flex; align-items:center; justify-content:center; color:#555; font-size:12px;">NO SIGNAL</div>
+                        `}
+                    </div>
+                    <div style="padding:8px 12px; font-size:11px; display:flex; justify-content:space-between; align-items:center; background:#141414;">
+                        <div>${detBadge}</div>
+                        <div style="color:#777; font-size:10px;">Sharpness: ${info.sharpness || '—'}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Action links
         const actionsDiv = document.getElementById('savedActionBtns');
-
         if (data.saved && data.session_id) {
-            dbStatusEl.innerHTML = `<span style="color:var(--success); font-weight:600;"><i class="fas fa-check-circle"></i> Saved in Data_base</span>`;
             document.getElementById('btnOpenSession').href = `/vehicle/${data.session_id}`;
             actionsDiv.style.display = 'flex';
         } else {
-            dbStatusEl.textContent = 'Analysis only (Not saved to database)';
             actionsDiv.style.display = 'none';
         }
 
-        // Scroll to results smoothly
+        // Scroll into view
         resultsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     } catch (err) {
         console.error('Upload error:', err);
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-microchip"></i> ANALYZE &amp; STORE VEHICLE';
-        alert('Server communication error during image analysis');
+        btn.innerHTML = '<i class="fas fa-microchip"></i> ANALYZE ALL VIEWS &amp; STORE VEHICLE';
+        alert('Server communication error during media analysis');
     }
 }
 
-function formatBytes(bytes, decimals = 2) {
-    if (bytes === 0) return '0 Bytes';
+function formatBytes(bytes, decimals = 1) {
+    if (bytes === 0) return '0 B';
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }

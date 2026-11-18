@@ -76,33 +76,56 @@ def upload_page():
 
 @app.route("/api/vehicle/upload", methods=["POST"])
 def api_upload_vehicle():
-    """Upload a vehicle image from this PC, analyze with YOLO & OCR, and store to DB."""
-    if "file" not in request.files and "image" not in request.files:
-        return jsonify({"success": False, "error": "No image file provided"}), 400
+    """
+    Upload up to 4 vehicle photos or videos from this PC,
+    analyze views automatically (Front, Back, Left, Right),
+    extract plate via EasyOCR, and store to Database.
+    """
+    files_data = []
 
-    file = request.files.get("file") or request.files.get("image")
-    if not file or file.filename == "":
-        return jsonify({"success": False, "error": "No file selected"}), 400
+    # 1. Check for slot-based uploads (front, back, left, right)
+    for cam in ["front", "back", "left", "right"]:
+        f = request.files.get(cam)
+        if f and f.filename != "":
+            files_data.append({
+                "file_bytes": f.read(),
+                "filename": f.filename,
+                "camera_view": cam
+            })
 
-    camera_view = request.form.get("camera_view", "front").lower()
+    # 2. Check for multi-file list upload ("files" or "file")
+    if not files_data:
+        file_list = request.files.getlist("files") or request.files.getlist("file")
+        views_list = request.form.getlist("camera_views") or []
+        for i, f in enumerate(file_list):
+            if f and f.filename != "":
+                cam_view = views_list[i] if i < len(views_list) else ""
+                files_data.append({
+                    "file_bytes": f.read(),
+                    "filename": f.filename,
+                    "camera_view": cam_view
+                })
+
+    if not files_data:
+        return jsonify({"success": False, "error": "No image or video files selected."}), 400
+
+    # Limit to maximum 4 files
+    files_data = files_data[:4]
+
     save_to_db = request.form.get("save_to_database", "true").lower() == "true"
     plate_override = request.form.get("vehicle_number", "").strip()
 
     cfg = load_config()
     conf = float(cfg.get("yolo_confidence", 0.40))
-    device = cfg.get("device", "auto")
 
-    from backend.services.upload_service import process_uploaded_vehicle_image
-    image_bytes = file.read()
-    result = process_uploaded_vehicle_image(
-        image_bytes=image_bytes,
-        camera_view=camera_view,
+    from backend.services.upload_service import process_multi_vehicle_media
+    result = process_multi_vehicle_media(
+        files_data=files_data,
         database_dir=DATABASE_DIR,
         db_manager=db,
         save_to_database=save_to_db,
         vehicle_number_override=plate_override,
-        yolo_confidence=conf,
-        device=device
+        yolo_confidence=conf
     )
     return jsonify(result)
 
