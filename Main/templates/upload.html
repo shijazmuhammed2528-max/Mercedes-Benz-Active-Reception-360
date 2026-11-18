@@ -32,6 +32,26 @@
             </div>
         </div>
 
+        <!-- 4-View Readiness Tracker -->
+        <div id="viewCoverageBar" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-top:14px;">
+            <div id="slotFront" style="background:#161616; border:1px solid #333; padding:8px 6px; border-radius:4px; text-align:center;">
+                <div style="font-size:9px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">CAM 01 FRONT</div>
+                <div id="slotTextFront" style="font-size:10px; font-weight:600; color:var(--warning); margin-top:2px;"><i class="fas fa-exclamation-circle"></i> Missing</div>
+            </div>
+            <div id="slotBack" style="background:#161616; border:1px solid #333; padding:8px 6px; border-radius:4px; text-align:center;">
+                <div style="font-size:9px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">CAM 02 REAR</div>
+                <div id="slotTextBack" style="font-size:10px; font-weight:600; color:var(--warning); margin-top:2px;"><i class="fas fa-exclamation-circle"></i> Missing</div>
+            </div>
+            <div id="slotLeft" style="background:#161616; border:1px solid #333; padding:8px 6px; border-radius:4px; text-align:center;">
+                <div style="font-size:9px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">CAM 03 LEFT</div>
+                <div id="slotTextLeft" style="font-size:10px; font-weight:600; color:var(--warning); margin-top:2px;"><i class="fas fa-exclamation-circle"></i> Missing</div>
+            </div>
+            <div id="slotRight" style="background:#161616; border:1px solid #333; padding:8px 6px; border-radius:4px; text-align:center;">
+                <div style="font-size:9px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">CAM 04 RIGHT</div>
+                <div id="slotTextRight" style="font-size:10px; font-weight:600; color:var(--warning); margin-top:2px;"><i class="fas fa-exclamation-circle"></i> Missing</div>
+            </div>
+        </div>
+
         <!-- Selected Files List (up to 4 items) -->
         <div id="selectedFilesSection" style="display:none; margin-top:16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
@@ -88,6 +108,14 @@
             <!-- Populated dynamically: FRONT, REAR, LEFT, RIGHT -->
         </div>
 
+        <!-- Plate Correction in Results -->
+        <div class="plate-input-group" id="plateCorrectionGroup" style="margin-bottom:16px; display:flex; gap:8px;">
+            <input type="text" id="resPlateInput" placeholder="CONFIRM / EDIT REGISTRATION" maxlength="20" style="background:#111; color:#fff; border:1px solid #444; padding:6px 12px; border-radius:4px; font-weight:700; text-transform:uppercase; flex:1;">
+            <button class="btn btn-primary btn-sm" onclick="saveUploadPlate()">
+                <i class="fas fa-save"></i> UPDATE REGISTRATION
+            </button>
+        </div>
+
         <!-- Actions -->
         <div id="savedActionBtns" style="display:none; gap:10px; flex-wrap:wrap;">
             <a id="btnViewDb" href="/database" class="btn btn-primary" style="flex:1; justify-content:center;">
@@ -96,6 +124,44 @@
             <a id="btnOpenSession" href="#" class="btn btn-outline" style="flex:1; justify-content:center;">
                 <i class="fas fa-external-link-alt"></i> OPEN RECORD DETAILS
             </a>
+        </div>
+    </div>
+</div>
+
+<!-- Incomplete Views Confirmation Modal -->
+<div class="modal-overlay" id="incompleteModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:10002; justify-content:center; align-items:center;">
+    <div style="background:#161616; border:1px solid #444; border-radius:8px; max-width:520px; width:92%; padding:24px; box-shadow:0 12px 40px rgba(0,0,0,0.9);">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+            <div style="width:40px; height:40px; border-radius:50%; background:rgba(245,166,35,0.15); display:flex; align-items:center; justify-content:center; color:var(--warning); font-size:20px;">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <div>
+                <h3 style="margin:0; font-size:16px; color:#fff; font-weight:700;">Incomplete 360° Camera Views</h3>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">All 4 camera angles required for full reception</div>
+            </div>
+        </div>
+
+        <p style="font-size:13px; color:#ccc; line-height:1.6; margin-bottom:12px;">
+            You have selected <strong id="modalSelectedCount" style="color:var(--warning);">0</strong> of the <strong>4 required views</strong>.
+            The system needs 4 camera views (Front, Rear, Left, Right) to complete the 360° capture record.
+        </p>
+
+        <div style="margin-bottom:14px;">
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">Missing Views:</div>
+            <div id="modalMissingList" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+        </div>
+
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:20px;">
+            Would you like to select the remaining missing files now, or proceed with partial views?
+        </p>
+
+        <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="addMissingFilesFromModal()" style="font-weight:600;">
+                <i class="fas fa-folder-open"></i> BROWSE &amp; ADD MISSING FILES
+            </button>
+            <button class="btn btn-outline" onclick="proceedAnywayFromModal()" style="font-size:12px;">
+                Proceed With Partial Views
+            </button>
         </div>
     </div>
 </div>

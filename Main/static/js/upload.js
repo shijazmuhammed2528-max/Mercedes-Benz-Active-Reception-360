@@ -1,6 +1,7 @@
 // Vehicle Multi-Media Upload & Analysis JavaScript — Mercedes-Benz Active Reception
 
 let selectedFilesList = []; // Array of { file: File, cameraView: string }
+let currentUploadedSessionId = null;
 
 const CAM_VIEWS = [
     { id: 'front', label: 'CAM 01 — FRONT VIEW' },
@@ -46,6 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
             handleIncomingFiles(fileInput.files);
         }
     });
+
+    updateViewCoverageTracker();
 });
 
 function handleIncomingFiles(fileList) {
@@ -59,7 +62,10 @@ function handleIncomingFiles(fileList) {
 
     // Combine with existing up to maximum 4
     for (const f of validMedia) {
-        if (selectedFilesList.length >= 4) break;
+        if (selectedFilesList.length >= 4) {
+            alert('Maximum 4 media files allowed for 360° reception (Front, Rear, Left, Right).');
+            break;
+        }
         // Avoid adding duplicate filename
         if (!selectedFilesList.some(item => item.file.name === f.name && item.file.size === f.size)) {
             const defaultView = guessViewFromFilename(f.name, selectedFilesList.map(x => x.cameraView));
@@ -94,6 +100,27 @@ function isMediaExtension(name) {
     return ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.jpg', '.jpeg', '.png', '.webp'].some(ext => lower.endsWith(ext));
 }
 
+function updateViewCoverageTracker() {
+    const views = ['front', 'back', 'left', 'right'];
+
+    views.forEach(v => {
+        const slot = document.getElementById('slot' + capitalize(v));
+        const text = document.getElementById('slotText' + capitalize(v));
+        if (!slot || !text) return;
+
+        const match = selectedFilesList.find(item => item.cameraView === v);
+        if (match) {
+            slot.style.background = 'rgba(0, 200, 83, 0.08)';
+            slot.style.borderColor = 'var(--success)';
+            text.innerHTML = `<span style="color:var(--success); font-weight:700;"><i class="fas fa-check-circle"></i> Ready</span>`;
+        } else {
+            slot.style.background = '#161616';
+            slot.style.borderColor = '#333';
+            text.innerHTML = `<span style="color:var(--warning);"><i class="fas fa-exclamation-circle"></i> Missing</span>`;
+        }
+    });
+}
+
 function renderSelectedFiles() {
     const section = document.getElementById('selectedFilesSection');
     const container = document.getElementById('selectedFilesContainer');
@@ -101,6 +128,8 @@ function renderSelectedFiles() {
     const btnAnalyze = document.getElementById('btnAnalyze');
 
     countBadge.textContent = selectedFilesList.length;
+
+    updateViewCoverageTracker();
 
     if (selectedFilesList.length === 0) {
         section.style.display = 'none';
@@ -154,6 +183,7 @@ function renderSelectedFiles() {
 function changeItemView(index, newView) {
     if (selectedFilesList[index]) {
         selectedFilesList[index].cameraView = newView;
+        updateViewCoverageTracker();
     }
 }
 
@@ -169,9 +199,72 @@ function clearAllFiles() {
     document.getElementById('resultsCard').style.display = 'none';
 }
 
+function checkViewConflicts() {
+    const usedViews = selectedFilesList.map(x => x.cameraView);
+    const duplicates = usedViews.filter((item, index) => usedViews.indexOf(item) !== index);
+    return duplicates;
+}
+
+function getMissingViews() {
+    const usedViews = selectedFilesList.map(x => x.cameraView);
+    return ['front', 'back', 'left', 'right'].filter(v => !usedViews.includes(v));
+}
+
+function showIncompleteModal(missing) {
+    const modal = document.getElementById('incompleteModal');
+    const countEl = document.getElementById('modalSelectedCount');
+    const listEl = document.getElementById('modalMissingList');
+
+    countEl.textContent = `${selectedFilesList.length}`;
+
+    const missingMap = {
+        front: 'CAM 01 — FRONT VIEW',
+        back: 'CAM 02 — REAR VIEW',
+        left: 'CAM 03 — LEFT SIDE VIEW',
+        right: 'CAM 04 — RIGHT SIDE VIEW'
+    };
+
+    listEl.innerHTML = missing.map(m =>
+        `<span style="background:rgba(245,166,35,0.15); color:var(--warning); border:1px solid rgba(245,166,35,0.4); padding:4px 10px; border-radius:4px; font-weight:700; font-size:11px;">
+            <i class="fas fa-camera"></i> ${missingMap[m]}
+        </span>`
+    ).join('');
+
+    modal.style.display = 'flex';
+}
+
+function addMissingFilesFromModal() {
+    document.getElementById('incompleteModal').style.display = 'none';
+    document.getElementById('fileInput').click();
+}
+
+function proceedAnywayFromModal() {
+    document.getElementById('incompleteModal').style.display = 'none';
+    executeUploadAndAnalyze();
+}
+
 async function uploadAndAnalyze() {
     if (selectedFilesList.length === 0) return;
 
+    // Check 1: View conflict (duplicate view assignment)
+    const duplicates = checkViewConflicts();
+    if (duplicates.length > 0) {
+        const dupNames = duplicates.map(d => d.toUpperCase()).join(', ');
+        alert(`⚠️ Camera View Assignment Conflict!\n\nYou have multiple files assigned to the same camera view (${dupNames}).\n\nPlease select unique camera angles (Front, Rear, Left, Right) using the dropdown on each file.`);
+        return;
+    }
+
+    // Check 2: Fewer than 4 views selected -> ASK USER FIRST
+    const missing = getMissingViews();
+    if (missing.length > 0) {
+        showIncompleteModal(missing);
+        return;
+    }
+
+    executeUploadAndAnalyze();
+}
+
+async function executeUploadAndAnalyze() {
     const btn = document.getElementById('btnAnalyze');
     const resultsCard = document.getElementById('resultsCard');
     const saveToDb = document.getElementById('checkSaveDb').checked;
@@ -182,7 +275,6 @@ async function uploadAndAnalyze() {
 
     const formData = new FormData();
     selectedFilesList.forEach((item) => {
-        // Send under the specific camera slot: front, back, left, right
         formData.append(item.cameraView, item.file);
     });
 
@@ -206,14 +298,19 @@ async function uploadAndAnalyze() {
             return;
         }
 
+        currentUploadedSessionId = data.session_id;
+
         // Render Results
         resultsCard.style.display = 'block';
 
-        // Plate Banner
+        // Plate Banner & Input
         const plate = data.plate_text || 'UNKNOWN';
         const plateEl = document.getElementById('resPlate');
         plateEl.textContent = plate;
         plateEl.style.color = (plate === 'UNKNOWN') ? 'var(--warning)' : 'var(--success)';
+
+        const plateInput = document.getElementById('resPlateInput');
+        if (plateInput) plateInput.value = (plate === 'UNKNOWN') ? '' : plate;
 
         document.getElementById('resMetaRight').innerHTML = `
             <div><strong>Total Files:</strong> ${data.total_files}</div>
@@ -237,12 +334,12 @@ async function uploadAndAnalyze() {
             const isDetected = info.vehicle_detected;
             const detBadge = isDetected 
                 ? `<span style="color:var(--success); font-weight:700;"><i class="fas fa-check-circle"></i> ${(det.class_name || 'CAR').toUpperCase()} (${Math.round(det.confidence * 100)}%)</span>`
-                : `<span style="color:var(--text-muted);"><i class="fas fa-search"></i> Searching</span>`;
+                : `<span style="color:var(--warning);"><i class="fas fa-exclamation-triangle"></i> No vehicle detected</span>`;
 
             const formatTag = info.is_video ? `VIDEO (${info.duration_seconds}s)` : 'PHOTO';
 
             return `
-                <div style="background:#141414; border:1px solid #2a2a2a; border-radius:6px; overflow:hidden;">
+                <div style="background:#141414; border:1px solid ${isDetected ? '#2a2a2a' : 'rgba(245,166,35,0.4)'}; border-radius:6px; overflow:hidden;">
                     <div style="padding:8px 12px; background:#1b1b1b; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #2a2a2a;">
                         <span style="font-size:11px; font-weight:700; color:#fff; letter-spacing:0.05em;">${camLabels[c]}</span>
                         <span style="font-size:9px; font-weight:700; background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:3px; color:#aaa;">${formatTag}</span>
@@ -280,6 +377,41 @@ async function uploadAndAnalyze() {
         btn.innerHTML = '<i class="fas fa-microchip"></i> ANALYZE ALL VIEWS &amp; STORE VEHICLE';
         alert('Server communication error during media analysis');
     }
+}
+
+async function saveUploadPlate() {
+    const input = document.getElementById('resPlateInput');
+    if (!input || !currentUploadedSessionId) return;
+
+    const newPlate = input.value.trim().toUpperCase();
+    if (!newPlate) {
+        alert('Please enter a valid registration number.');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/capture/set-plate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plate: newPlate })
+        });
+        const data = await res.json();
+        if (data.success) {
+            const plateEl = document.getElementById('resPlate');
+            plateEl.textContent = data.plate;
+            plateEl.style.color = 'var(--success)';
+            alert(`Registration updated to: ${data.plate}`);
+        } else {
+            alert('Update failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Plate update error:', e);
+        alert('Failed to update plate');
+    }
+}
+
+function capitalize(s) {
+    return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function formatBytes(bytes, decimals = 1) {
