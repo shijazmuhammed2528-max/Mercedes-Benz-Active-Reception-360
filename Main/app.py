@@ -70,6 +70,42 @@ def vehicle_detail_page(session_id):
 def settings_page():
     return render_template("settings.html")
 
+@app.route("/upload")
+def upload_page():
+    return render_template("upload.html")
+
+@app.route("/api/vehicle/upload", methods=["POST"])
+def api_upload_vehicle():
+    """Upload a vehicle image from this PC, analyze with YOLO & OCR, and store to DB."""
+    if "file" not in request.files and "image" not in request.files:
+        return jsonify({"success": False, "error": "No image file provided"}), 400
+
+    file = request.files.get("file") or request.files.get("image")
+    if not file or file.filename == "":
+        return jsonify({"success": False, "error": "No file selected"}), 400
+
+    camera_view = request.form.get("camera_view", "front").lower()
+    save_to_db = request.form.get("save_to_database", "true").lower() == "true"
+    plate_override = request.form.get("vehicle_number", "").strip()
+
+    cfg = load_config()
+    conf = float(cfg.get("yolo_confidence", 0.40))
+    device = cfg.get("device", "auto")
+
+    from backend.services.upload_service import process_uploaded_vehicle_image
+    image_bytes = file.read()
+    result = process_uploaded_vehicle_image(
+        image_bytes=image_bytes,
+        camera_view=camera_view,
+        database_dir=DATABASE_DIR,
+        db_manager=db,
+        save_to_database=save_to_db,
+        vehicle_number_override=plate_override,
+        yolo_confidence=conf,
+        device=device
+    )
+    return jsonify(result)
+
 # ═══════════════════════════════════════════════════════════════
 # API — Dashboard
 # ═══════════════════════════════════════════════════════════════

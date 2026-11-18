@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Image Analysis — Active Reception{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>VEHICLE IMAGE ANALYSIS</h1>
+    <p class="subtitle">Select or browse a car image from this PC to detect vehicles, analyze view quality, extract license plates, and store the record in the database</p>
+</div>
+
+<div class="grid-2" style="align-items:start;">
+    <!-- Upload Panel -->
+    <div class="card">
+        <div class="card-header">
+            <span class="card-title"><i class="fas fa-desktop" style="color:var(--info);"></i> Load Image from This PC</span>
+            <span class="badge badge-info" style="font-size:10px;">MODE 5 — MANUAL RECEPTION</span>
+        </div>
+
+        <!-- Drag & Drop Dropzone -->
+        <div id="dropZone" class="upload-dropzone" style="border: 2px dashed var(--border-light); border-radius: var(--radius-lg); padding: 36px 20px; text-align: center; background: rgba(255,255,255,0.02); cursor: pointer; transition: var(--transition);">
+            <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/jpg" style="display:none;">
+            <div id="dropPrompt">
+                <i class="fas fa-cloud-upload-alt fa-3x" style="color:var(--text-muted); margin-bottom:12px;"></i>
+                <div style="font-size:14px; font-weight:600; color:var(--text-primary); margin-bottom:6px;">
+                    Drag &amp; drop car photo here, or click to browse
+                </div>
+                <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">
+                    Supports JPG, PNG, WEBP from your computer drives
+                </div>
+                <button type="button" class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                    <i class="fas fa-folder-open"></i> BROWSE THIS PC
+                </button>
+            </div>
+
+            <!-- Selected File Indicator -->
+            <div id="fileSelectedInfo" style="display:none;">
+                <div style="position:relative; max-width:280px; margin:0 auto 12px auto; border-radius:6px; overflow:hidden; border:1px solid var(--border);">
+                    <img id="localPreviewImg" src="" alt="Selected Preview" style="width:100%; height:auto; display:block;">
+                </div>
+                <div style="font-weight:600; font-size:13px; color:var(--text-primary);" id="selectedFileName">—</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;" id="selectedFileSize">—</div>
+                <button type="button" class="btn btn-sm btn-outline mt-12" onclick="clearSelectedFile(event)">
+                    <i class="fas fa-times"></i> Change Image
+                </button>
+            </div>
+        </div>
+
+        <!-- Options -->
+        <div class="mt-20">
+            <div class="form-group mb-16">
+                <label style="font-size:12px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">Camera View Angle</label>
+                <select id="selectView" class="form-control" style="background:#111; color:#fff; border:1px solid var(--border); padding:8px 12px; border-radius:4px; width:100%;">
+                    <option value="front" selected>CAM 01 — FRONT VIEW (Front License Plate)</option>
+                    <option value="back">CAM 02 — REAR VIEW (Rear License Plate)</option>
+                    <option value="left">CAM 03 — LEFT SIDE VIEW</option>
+                    <option value="right">CAM 04 — RIGHT SIDE VIEW</option>
+                </select>
+            </div>
+
+            <div class="form-group mb-16">
+                <label style="font-size:12px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">
+                    Registration Plate Override <small style="text-transform:none; color:var(--text-muted);">(Optional — auto-read by OCR if blank)</small>
+                </label>
+                <input type="text" id="plateOverride" class="form-control" placeholder="e.g. KL 01 AL 0009" maxlength="20" style="background:#111; color:#fff; border:1px solid var(--border); padding:8px 12px; border-radius:4px; width:100%; text-transform:uppercase;">
+            </div>
+
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px; padding:10px 14px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:4px;">
+                <input type="checkbox" id="checkSaveDb" checked style="width:16px; height:16px; cursor:pointer;">
+                <label for="checkSaveDb" style="margin:0; font-size:13px; color:var(--text-primary); cursor:pointer; font-weight:500;">
+                    Store record and photos into local database (<code style="color:var(--info);">D:\Project Costal star\Data_base</code>)
+                </label>
+            </div>
+
+            <button type="button" class="btn btn-success btn-lg" id="btnAnalyze" onclick="uploadAndAnalyze()" disabled style="width:100%; justify-content:center;">
+                <i class="fas fa-microchip"></i> ANALYZE &amp; STORE VEHICLE
+            </button>
+        </div>
+    </div>
+
+    <!-- Analysis Results -->
+    <div class="card" id="resultsCard" style="display:none;">
+        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <span class="card-title"><i class="fas fa-check-circle" style="color:var(--success);"></i> Analysis &amp; Storage Results</span>
+            <span class="badge badge-success" id="resultStatusBadge">COMPLETED</span>
+        </div>
+
+        <!-- Annotated Image Preview with Green Bounding Box -->
+        <div style="position:relative; width:100%; background:#000; border-radius:6px; overflow:hidden; border:1px solid var(--border); margin-bottom:16px;">
+            <img id="annotatedImg" src="" alt="Annotated Vehicle" style="width:100%; height:auto; display:block;">
+        </div>
+
+        <!-- Metrics Grid -->
+        <div class="vehicle-info-grid" style="grid-template-columns: repeat(2, 1fr); margin-bottom:16px;">
+            <div class="vehicle-info-item">
+                <span class="info-label">Detected Vehicle</span>
+                <span class="info-value" id="resClass">—</span>
+            </div>
+            <div class="vehicle-info-item">
+                <span class="info-label">YOLO Confidence</span>
+                <span class="info-value" id="resConf">—</span>
+            </div>
+            <div class="vehicle-info-item">
+                <span class="info-label">Extracted License Plate</span>
+                <span class="info-value" id="resPlate" style="color:var(--success); font-weight:700;">—</span>
+            </div>
+            <div class="vehicle-info-item">
+                <span class="info-label">Sharpness Score</span>
+                <span class="info-value" id="resSharpness">—</span>
+            </div>
+            <div class="vehicle-info-item">
+                <span class="info-label">Resolution</span>
+                <span class="info-value" id="resResolution">—</span>
+            </div>
+            <div class="vehicle-info-item">
+                <span class="info-label">Database Status</span>
+                <span class="info-value" id="resDbStatus" style="font-size:12px;">—</span>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div id="savedActionBtns" style="display:none; gap:10px; flex-wrap:wrap;">
+            <a id="btnViewDb" href="/database" class="btn btn-primary" style="flex:1; justify-content:center;">
+                <i class="fas fa-database"></i> VIEW IN DATABASE
+            </a>
+            <a id="btnOpenSession" href="#" class="btn btn-outline" style="flex:1; justify-content:center;">
+                <i class="fas fa-external-link-alt"></i> OPEN RECORD DETAILS
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/upload.js"></script>
+{% endblock %}
