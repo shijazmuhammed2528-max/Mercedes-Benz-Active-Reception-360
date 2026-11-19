@@ -390,34 +390,170 @@ body {
 .cam-bar-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
-.source-mode-label {
+.live-power-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+    transition: all 0.3s ease;
+}
+
+.live-power-indicator.active {
+    background: rgba(0, 255, 102, 0.1);
+    border-color: rgba(0, 255, 102, 0.3);
+    color: var(--success);
+}
+
+.live-power-indicator .power-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #666;
+    transition: all 0.3s ease;
+}
+
+.live-power-indicator.active .power-dot {
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success);
+    animation: pulse 2s infinite;
+}
+
+.btn-scan-cams {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--text-primary);
     font-size: 11px;
     font-weight: 600;
-    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-scan-cams:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--accent-silver);
+    color: #fff;
+}
+
+/* ─── Per-Screen Camera Header & Assign Selector ────────── */
+.cam-header-title {
     display: flex;
     align-items: center;
-    gap: 5px;
-    margin: 0;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
-.source-select {
-    background: var(--bg-surface-3);
+.camera-screen-badge {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
     color: var(--text-primary);
-    border: 1px solid var(--border-light);
+}
+
+.cam-assign-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(0, 192, 240, 0.35);
     border-radius: 4px;
-    padding: 5px 10px;
+    padding: 3px 8px;
+    transition: border-color 0.2s;
+}
+
+.cam-assign-box:hover {
+    border-color: #00c0f0;
+}
+
+.cam-assign-box i.cam-icon {
+    font-size: 11px;
+    color: #00c0f0;
+}
+
+.cam-screen-select {
+    background: transparent;
+    color: #00c0f0;
+    border: none;
     font-size: 11px;
     font-weight: 600;
+    letter-spacing: 0.3px;
     cursor: pointer;
     outline: none;
-    transition: var(--transition);
+    max-width: 210px;
+    text-overflow: ellipsis;
 }
 
-.source-select:hover, .source-select:focus {
-    border-color: var(--accent-silver);
+.cam-screen-select option {
+    background: #181818;
+    color: #fff;
+    padding: 4px 8px;
+}
+
+/* ─── Camera Off Standby Overlay ────────────────────────── */
+.camera-panel .camera-feed {
+    position: relative;
+    overflow: hidden;
+}
+
+.cam-off-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(12, 12, 12, 0.95);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    z-index: 5;
+    transition: opacity 0.25s ease;
+    user-select: none;
+}
+
+.cam-off-overlay.hidden {
+    display: none !important;
+}
+
+.cam-off-icon {
+    font-size: 28px;
+    color: #444;
+}
+
+.cam-off-text {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #777;
+    text-transform: uppercase;
+}
+
+.cam-off-assigned {
+    font-size: 10px;
+    font-weight: 600;
+    color: #00c0f0;
+    background: rgba(0, 192, 240, 0.08);
+    border: 1px solid rgba(0, 192, 240, 0.25);
+    padding: 3px 10px;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
 }
 
 /* ─── Camera Grid ───────────────────────────────────────── */

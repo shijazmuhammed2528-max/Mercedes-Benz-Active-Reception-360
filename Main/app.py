@@ -204,6 +204,39 @@ def api_set_camera_source():
     return jsonify(result)
 
 # ═══════════════════════════════════════════════════════════════
+# API — Per-Screen Camera Device Assignment & Discovery
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/cameras/available", methods=["GET"])
+def api_cameras_available():
+    """Discover connected USB and integrated webcams."""
+    from backend.services.camera_discovery import get_available_cameras
+    refresh = request.args.get("refresh", "false").lower() == "true"
+    avail = get_available_cameras(VIDEO_SOURCES, force_refresh=refresh)
+    avail["current_mapping"] = controller.get_camera_mapping()
+    avail["is_live"] = controller.is_running
+    return jsonify(avail)
+
+@app.route("/api/cameras/assign", methods=["POST"])
+def api_cameras_assign():
+    """Assign physical camera or video file to a specific screen."""
+    data = request.get_json() or {}
+    screen = data.get("screen", "")
+    source = data.get("source", "")
+    if not screen or source is None or source == "":
+        return jsonify({"success": False, "error": "Screen and source are required"}), 400
+    result = controller.assign_screen_camera(screen, source)
+    return jsonify(result)
+
+@app.route("/api/cameras/mapping", methods=["GET"])
+def api_cameras_mapping():
+    """Get current screen-to-camera assignments."""
+    return jsonify({
+        "mapping": controller.get_camera_mapping(),
+        "is_live": controller.is_running
+    })
+
+# ═══════════════════════════════════════════════════════════════
 # API — Video Streaming (MJPEG)
 # ═══════════════════════════════════════════════════════════════
 
@@ -233,13 +266,14 @@ def generate_mjpeg(camera_name: str):
 
 
 def create_blank_frame(camera_name: str):
-    """Create a blank placeholder frame."""
+    """Create a blank placeholder frame indicating camera standby."""
     import numpy as np
     frame = np.zeros((360, 640, 3), dtype=np.uint8)
-    frame[:] = (20, 20, 20)
+    frame[:] = (18, 18, 18)
     label = CAMERA_LABELS.get(camera_name, camera_name.upper())
-    cv2.putText(frame, label, (20, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2)
-    cv2.putText(frame, "NO SIGNAL", (220, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 80), 2)
+    cv2.putText(frame, label, (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (140, 140, 140), 2)
+    cv2.putText(frame, "CAMERAS OFF (STANDBY)", (150, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (180, 180, 180), 2)
+    cv2.putText(frame, "Click START LIVE VIEW to Activate", (170, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
     return frame
 
 

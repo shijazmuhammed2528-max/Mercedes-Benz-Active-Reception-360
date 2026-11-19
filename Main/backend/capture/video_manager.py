@@ -68,9 +68,20 @@ class CameraStream:
                 else:
                     self.cap = cv2.VideoCapture(self.video_path)
 
-                if not self.cap.isOpened():
-                    logger.error("Cannot open stream: %s", self.video_path)
-                    return False
+                if self.cap is None or not self.cap.isOpened():
+                    # Attempt fallback to prerecorded file if physical camera is unplugged
+                    if is_device:
+                        from config import VIDEO_SOURCES
+                        fallback_file = VIDEO_SOURCES.get(self.name)
+                        if fallback_file and os.path.isfile(fallback_file):
+                            logger.warning("Camera index %s not connected for %s view. Falling back to %s",
+                                           self.video_path, self.name, fallback_file)
+                            self.cap = cv2.VideoCapture(fallback_file)
+
+                    if self.cap is None or not self.cap.isOpened():
+                        logger.error("Cannot open stream: %s", self.video_path)
+                        return False
+
                 self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 24.0
                 if self.fps <= 0 or self.fps > 120:
                     self.fps = 24.0
@@ -85,6 +96,19 @@ class CameraStream:
             except Exception as e:
                 logger.error("Error opening %s: %s", self.video_path, e)
                 return False
+
+    def set_source(self, new_source: str | int) -> bool:
+        """Dynamically update source for this camera screen."""
+        with self.lock:
+            was_open = self.is_open
+            if was_open and self.cap:
+                self.cap.release()
+                self.cap = None
+                self.is_open = False
+            self.video_path = new_source
+            if was_open:
+                return self.open()
+            return True
 
     def read_frame(self) -> bool:
         with self.lock:
@@ -203,6 +227,16 @@ class VideoManager:
         for name, path in video_sources.items():
             label = camera_labels.get(name, name.upper())
             self.cameras[name] = CameraStream(name, path, label)
+
+    def set_screen_source(self, screen_name: str, new_source: str | int) -> bool:
+        """Update a single screen's assigned camera source."""
+        if screen_name in self.cameras:
+            return self.cameras[screen_name].set_source(new_source)
+        return False
+
+    def get_sources(self) -> dict:
+        """Return dict of screen to source assignments."""
+        return {name: str(cam.video_path) for name, cam in self.cameras.items()}
 
     def set_sources(self, video_sources: dict):
         """Update sources dynamically."""

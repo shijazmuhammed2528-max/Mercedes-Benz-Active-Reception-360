@@ -3,11 +3,135 @@
 let statusInterval = null;
 let isSessionActive = false;
 let currentCameraView = 'all';
+let currentCameraMapping = {};
+let availableDevicesList = [];
 
 const CAMERAS = ['front', 'back', 'left', 'right'];
 const CAM_LABELS = {
-    front: 'CAMERA 0 [FRONT]', back: 'CAMERA 1 [BACK]', left: 'CAMERA 2 [LEFT]', right: 'CAMERA 3 [RIGHT]'
+    front: 'FRONT VIEW', back: 'REAR VIEW', left: 'LEFT VIEW', right: 'RIGHT VIEW'
 };
+
+// ─── Camera Discovery & Screen Assignment ─────────────────
+
+async function loadAvailableCameras(forceRefresh = false) {
+    try {
+        const res = await fetch(`/api/cameras/available?refresh=${forceRefresh ? 'true' : 'false'}`);
+        const data = await res.json();
+        availableDevicesList = data.devices || [];
+        currentCameraMapping = data.current_mapping || {};
+
+        CAMERAS.forEach(cam => {
+            const selectEl = document.getElementById('selectSrc' + capitalize(cam));
+            if (!selectEl) return;
+
+            const assignedSource = (currentCameraMapping[cam] && currentCameraMapping[cam].source !== undefined)
+                ? String(currentCameraMapping[cam].source)
+                : '';
+
+            // Build options
+            let optsHtml = '';
+
+            // 1. Hardware Devices
+            optsHtml += '<optgroup label="Physical Connected Cameras">';
+            availableDevicesList.forEach(dev => {
+                const isSelected = (assignedSource === dev.id || assignedSource === String(dev.index));
+                const badge = dev.connected ? '● ' : '○ ';
+                const statusSuffix = dev.connected ? ' (Connected)' : ' (Not Detected)';
+                optsHtml += `<option value="${dev.id}" ${isSelected ? 'selected' : ''}>${badge}${dev.label}${statusSuffix}</option>`;
+            });
+            optsHtml += '</optgroup>';
+
+            // 2. Demo Video File option
+            const isVideoSelected = assignedSource.startsWith('video') || assignedSource.endsWith('.mp4');
+            optsHtml += `<optgroup label="Prerecorded File Fallback">
+                <option value="video_${cam}" ${isVideoSelected ? 'selected' : ''}>📁 Prerecorded Video (${cam}.mp4)</option>
+            </optgroup>`;
+
+            selectEl.innerHTML = optsHtml;
+
+            // Update assigned text label
+            updateScreenAssignedBadge(cam, assignedSource);
+        });
+
+        // Set initial UI state
+        setLiveUIState(Boolean(data.is_live));
+
+    } catch (e) {
+        console.error('Failed to load available cameras:', e);
+    }
+}
+
+function updateScreenAssignedBadge(cam, source) {
+    const badgeEl = document.getElementById('assignedLabel' + capitalize(cam));
+    if (!badgeEl) return;
+
+    if (!source || source.startsWith('video') || source.endsWith('.mp4')) {
+        badgeEl.textContent = `Assigned: Demo File (${cam}.mp4)`;
+    } else {
+        const dev = availableDevicesList.find(d => d.id === String(source));
+        const devName = dev ? dev.label : `Camera ${source}`;
+        badgeEl.textContent = `Assigned: ${devName}`;
+    }
+}
+
+async function assignScreenCamera(screen, source) {
+    try {
+        const res = await fetch('/api/cameras/assign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ screen, source })
+        });
+        const data = await res.json();
+        if (data.success) {
+            updateScreenAssignedBadge(screen, source);
+            // If live view is actively running, reload that camera's live MJPEG stream
+            if (isSessionActive) {
+                const img = document.getElementById('feed' + capitalize(screen));
+                if (img) img.src = `/api/capture/stream/${screen}?t=${Date.now()}`;
+            }
+        } else {
+            alert('Failed to assign camera: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Assign camera error:', e);
+    }
+}
+
+async function rescanConnectedCameras() {
+    const icon = document.getElementById('scanIcon');
+    if (icon) icon.classList.add('fa-spin');
+    await loadAvailableCameras(true);
+    if (icon) icon.classList.remove('fa-spin');
+}
+
+function setLiveUIState(isLive) {
+    isSessionActive = isLive;
+    const powerInd = document.getElementById('livePowerIndicator');
+    const powerText = document.getElementById('powerText');
+
+    if (isLive) {
+        if (powerInd) powerInd.classList.add('active');
+        if (powerText) powerText.textContent = 'LIVE VIEW ACTIVE (CAMERAS ON)';
+        CAMERAS.forEach(cam => {
+            const overlay = document.getElementById('overlay' + capitalize(cam));
+            if (overlay) overlay.classList.add('hidden');
+        });
+    } else {
+        if (powerInd) powerInd.classList.remove('active');
+        if (powerText) powerText.textContent = 'CAMERAS OFF (STANDBY)';
+        CAMERAS.forEach(cam => {
+            const overlay = document.getElementById('overlay' + capitalize(cam));
+            if (overlay) overlay.classList.remove('hidden');
+            const statusTxt = document.getElementById('statusText' + capitalize(cam));
+            if (statusTxt) {
+                statusTxt.textContent = 'CAM OFF';
+                statusTxt.style.color = 'var(--text-muted)';
+            }
+            const dot = document.getElementById('dot' + capitalize(cam));
+            if (dot) dot.classList.remove('active');
+        });
+    }
+}
 
 // ─── Capture Controls ──────────────────────────────────────
 
@@ -27,6 +151,10 @@ async function changeCaptureDelay(val) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // 1. Load available cameras and assign screen pickers
+    await loadAvailableCameras(false);
+
+    // 2. Load capture delay setting
     try {
         const res = await fetch('/api/settings');
         const cfg = await res.json();
@@ -46,14 +174,14 @@ async function startCapture() {
         const data = await res.json();
 
         if (data.success) {
-            isSessionActive = true;
+            setLiveUIState(true);
             document.getElementById('btnPause').disabled = false;
             document.getElementById('btnStop').disabled = false;
 
             // Start MJPEG streams
             CAMERAS.forEach(cam => {
                 const img = document.getElementById('feed' + capitalize(cam));
-                img.src = `/api/capture/stream/${cam}?t=${Date.now()}`;
+                if (img) img.src = `/api/capture/stream/${cam}?t=${Date.now()}`;
             });
 
             // Start status polling
@@ -92,17 +220,18 @@ async function resumeCapture() {
 async function stopCapture() {
     try {
         await fetch('/api/capture/stop', { method: 'POST' });
-        isSessionActive = false;
         stopStatusPolling();
+        setLiveUIState(false);
 
         document.getElementById('btnStart').disabled = false;
         document.getElementById('btnPause').disabled = true;
         document.getElementById('btnResume').disabled = true;
         document.getElementById('btnStop').disabled = true;
 
-        // Clear streams
+        // Clear streams so browser disconnects from camera hardware
         CAMERAS.forEach(cam => {
-            document.getElementById('feed' + capitalize(cam)).src = '';
+            const img = document.getElementById('feed' + capitalize(cam));
+            if (img) img.src = '';
         });
     } catch (e) {
         console.error('Stop error:', e);
@@ -112,8 +241,8 @@ async function stopCapture() {
 async function resetCapture() {
     try {
         await fetch('/api/capture/reset', { method: 'POST' });
-        isSessionActive = false;
         stopStatusPolling();
+        setLiveUIState(false);
 
         document.getElementById('btnStart').disabled = false;
         document.getElementById('btnPause').disabled = true;
@@ -123,12 +252,13 @@ async function resetCapture() {
 
         // Clear streams
         CAMERAS.forEach(cam => {
-            document.getElementById('feed' + capitalize(cam)).src = '';
+            const img = document.getElementById('feed' + capitalize(cam));
+            if (img) img.src = '';
         });
 
         // Reset conditions
         resetConditions();
-        updateStateIndicator('INITIALIZING', 'SYSTEM READY');
+        updateStateIndicator('OFFLINE', 'CAMERAS OFF (STANDBY)');
     } catch (e) {
         console.error('Reset error:', e);
     }

@@ -34,8 +34,20 @@ class CaptureController:
         self.db = db_manager
 
         # Video manager
-        from config import VIDEO_SOURCES, CAMERA_LABELS
-        self.video_manager = VideoManager(VIDEO_SOURCES, CAMERA_LABELS)
+        from config import VIDEO_SOURCES, CAMERA_LABELS, load_config
+        cfg = load_config()
+        sources = dict(VIDEO_SOURCES)
+        saved_sources = cfg.get("camera_sources")
+        if saved_sources and isinstance(saved_sources, dict):
+            for k, v in saved_sources.items():
+                if k in sources:
+                    if str(v).isdigit():
+                        sources[k] = int(v)
+                    elif str(v).startswith("video"):
+                        sources[k] = VIDEO_SOURCES.get(k, v)
+                    else:
+                        sources[k] = v
+        self.video_manager = VideoManager(sources, CAMERA_LABELS)
 
         # Motion detectors (one per camera)
         self.motion_detectors = {}
@@ -115,6 +127,54 @@ class CaptureController:
             logger.info("Camera sources switched to %s: %s", mode_or_sources, sources)
             return {"success": True, "sources": {k: str(v) for k, v in sources.items()}, "mode": mode_or_sources}
 
+    def assign_screen_camera(self, screen_name: str, source: str | int) -> dict:
+        """Assign a specific physical camera (0,1,2...) or video file to one of the 4 reception screens."""
+        from config import VIDEO_SOURCES, save_config, load_config
+        with self._lock:
+            # Resolve actual source
+            actual_source = source
+            if str(source).startswith("video"):
+                actual_source = VIDEO_SOURCES.get(screen_name, str(source))
+            elif isinstance(source, str) and source.strip().isdigit():
+                actual_source = int(source.strip())
+
+            success = self.video_manager.set_screen_source(screen_name, actual_source)
+
+            # Persist assignment in app config
+            cfg = load_config()
+            sources_map = cfg.get("camera_sources", {})
+            sources_map[screen_name] = str(source)
+            cfg["camera_sources"] = sources_map
+            save_config(cfg)
+            self.config["camera_sources"] = sources_map
+
+            logger.info("Screen '%s' assigned to camera source '%s' (success=%s, is_open=%s)",
+                        screen_name, source, success,
+                        self.video_manager.cameras.get(screen_name, None).is_open if screen_name in self.video_manager.cameras else False)
+
+            return {
+                "success": True,
+                "screen": screen_name,
+                "source": str(source),
+                "is_open": self.video_manager.cameras[screen_name].is_open if screen_name in self.video_manager.cameras else False,
+                "mapping": self.get_camera_mapping()
+            }
+
+    def get_camera_mapping(self) -> dict:
+        """Get current screen-to-camera assignments and status."""
+        mapping = {}
+        for name, cam in self.video_manager.cameras.items():
+            src_str = str(cam.video_path)
+            is_dev = cam._is_device_source()
+            mapping[name] = {
+                "source": src_str,
+                "is_device": is_dev,
+                "device_index": cam._get_device_index() if is_dev else None,
+                "is_open": cam.is_open,
+                "label": cam.label,
+            }
+        return mapping
+
     def start(self) -> dict:
         """Start a new capture session."""
         if self.is_running:
@@ -129,12 +189,14 @@ class CaptureController:
         if not is_ocr_available():
             init_ocr()
 
-        # Open all videos
+        # Open all cameras/videos
         self.video_manager.reset_all()
         results = self.video_manager.open_all()
         failed = [name for name, ok in results.items() if not ok]
-        if failed:
-            return {"success": False, "error": f"Failed to open videos: {', '.join(failed)}"}
+        if len(failed) == len(self.video_manager.cameras):
+            return {"success": False, "error": f"Failed to open all cameras: {', '.join(failed)}"}
+        elif failed:
+            logger.warning("Some camera screens failed to open: %s (other screens remain active)", failed)
 
         # Reset state
         self.session_id = str(uuid.uuid4())[:8]
@@ -179,7 +241,8 @@ class CaptureController:
         self.is_paused = False
         self.capture_state.set("STOPPED")
         self.video_manager.release_all()
-        logger.info("Capture session stopped")
+        self._display_frames = {name: None for name in CAMERA_NAMES}
+        logger.info("Capture session stopped and physical cameras turned OFF")
         return {"success": True}
 
     def reset(self) -> dict:
@@ -192,13 +255,12 @@ class CaptureController:
         self._captured = False
         self._capture_result = None
         self._ready_start_time = None
-        self.video_manager.reset_all()
+        self.video_manager.release_all()
         for md in self.motion_detectors.values():
             md.reset()
         self.capture_state.set("INITIALIZING")
         self._display_frames = {name: None for name in CAMERA_NAMES}
-        self.video_manager.release_all()
-        logger.info("Session reset")
+        logger.info("Session reset and physical cameras turned OFF")
         return {"success": True}
 
     def set_plate(self, plate_text: str) -> dict:

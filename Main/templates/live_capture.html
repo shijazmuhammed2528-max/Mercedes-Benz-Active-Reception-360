@@ -16,53 +16,66 @@
 <!-- Camera Selector Bar -->
 <div class="camera-selector-bar" id="cameraSelectorBar">
     <div class="cam-bar-left">
-        <span class="cam-bar-label"><i class="fas fa-video"></i> SELECT CAMERA:</span>
+        <span class="cam-bar-label"><i class="fas fa-desktop"></i> SCREEN VIEW:</span>
         <div class="cam-bar-pills">
-            <button class="cam-select-btn active" id="btnCamAll" onclick="selectCameraView('all')" title="View all 4 cameras simultaneously">
-                <i class="fas fa-th-large"></i> ALL 4 CAMERAS (360°)
+            <button class="cam-select-btn active" id="btnCamAll" onclick="selectCameraView('all')" title="View all 4 screens simultaneously (360° Quad)">
+                <i class="fas fa-th-large"></i> ALL 4 SCREENS (360°)
             </button>
-            <button class="cam-select-btn" id="btnCamFront" onclick="selectCameraView('front')" title="Focus on Camera 0 (Front View)">
-                <span class="cam-num">0</span> CAMERA 0 [FRONT]
+            <button class="cam-select-btn" id="btnCamFront" onclick="selectCameraView('front')" title="Focus on Front View Screen">
+                <span class="cam-num">F</span> FRONT VIEW
                 <span class="cam-status-indicator" id="camIndFront"></span>
             </button>
-            <button class="cam-select-btn" id="btnCamBack" onclick="selectCameraView('back')" title="Focus on Camera 1 (Back View)">
-                <span class="cam-num">1</span> CAMERA 1 [BACK]
+            <button class="cam-select-btn" id="btnCamBack" onclick="selectCameraView('back')" title="Focus on Rear View Screen">
+                <span class="cam-num">R</span> REAR VIEW
                 <span class="cam-status-indicator" id="camIndBack"></span>
             </button>
-            <button class="cam-select-btn" id="btnCamLeft" onclick="selectCameraView('left')" title="Focus on Camera 2 (Left View)">
-                <span class="cam-num">2</span> CAMERA 2 [LEFT]
+            <button class="cam-select-btn" id="btnCamLeft" onclick="selectCameraView('left')" title="Focus on Left View Screen">
+                <span class="cam-num">L</span> LEFT VIEW
                 <span class="cam-status-indicator" id="camIndLeft"></span>
             </button>
-            <button class="cam-select-btn" id="btnCamRight" onclick="selectCameraView('right')" title="Focus on Camera 3 (Right View)">
-                <span class="cam-num">3</span> CAMERA 3 [RIGHT]
+            <button class="cam-select-btn" id="btnCamRight" onclick="selectCameraView('right')" title="Focus on Right View Screen">
+                <span class="cam-num">R</span> RIGHT VIEW
                 <span class="cam-status-indicator" id="camIndRight"></span>
             </button>
         </div>
     </div>
     <div class="cam-bar-right">
-        <label for="selectCamSourceMode" class="source-mode-label">
-            <i class="fas fa-plug"></i> Input:
-        </label>
-        <select id="selectCamSourceMode" onchange="switchCameraSourceMode(this.value)" class="source-select">
-            <option value="video" selected>Prerecorded Videos</option>
-            <option value="live">Live Cameras (Index 0, 1, 2, 3)</option>
-        </select>
+        <div class="live-power-indicator" id="livePowerIndicator">
+            <span class="power-dot"></span>
+            <span id="powerText">CAMERAS OFF (STANDBY)</span>
+        </div>
+        <button class="btn-scan-cams" id="btnRescanCams" onclick="rescanConnectedCameras()" title="Scan for newly plugged USB cameras">
+            <i class="fas fa-sync-alt" id="scanIcon"></i> SCAN USB CAMERAS
+        </button>
     </div>
 </div>
 
-<!-- Camera Grid -->
+<!-- Camera Grid (4 Reception Screens) -->
 <div class="camera-grid" id="cameraGrid">
-    <!-- FRONT (Camera 0) -->
+    <!-- FRONT VIEW SCREEN -->
     <div class="camera-panel" id="panelFront">
         <div class="camera-header">
-            <span class="camera-label">CAMERA 0 [FRONT]</span>
+            <div class="cam-header-title">
+                <span class="camera-screen-badge">FRONT VIEW</span>
+                <div class="cam-assign-box" title="Select camera hardware device or video for Front View">
+                    <i class="fas fa-video cam-icon"></i>
+                    <select class="cam-screen-select" id="selectSrcFront" onchange="assignScreenCamera('front', this.value)">
+                        <option value="0">Camera 0 (Laptop Main)</option>
+                    </select>
+                </div>
+            </div>
             <div class="camera-status">
                 <span class="status-dot" id="dotFront"></span>
-                <span id="statusTextFront">OFFLINE</span>
+                <span id="statusTextFront">CAM OFF</span>
             </div>
         </div>
-        <div class="camera-feed" onclick="selectCameraView('front')" style="cursor:pointer;" title="Click to focus on Camera 0 [Front]">
-            <img id="feedFront" src="" alt="Front Camera">
+        <div class="camera-feed" onclick="selectCameraView('front')" style="cursor:pointer;" title="Click to expand Front View">
+            <img id="feedFront" src="" alt="Front Camera Feed">
+            <div class="cam-off-overlay" id="overlayFront">
+                <i class="fas fa-video-slash cam-off-icon"></i>
+                <span class="cam-off-text">CAMERA OFF</span>
+                <small class="cam-off-assigned" id="assignedLabelFront">Assigned: Camera 0</small>
+            </div>
         </div>
         <div class="camera-info">
             <span id="motionFront">—</span>
@@ -70,17 +83,30 @@
         </div>
     </div>
 
-    <!-- REAR (Camera 1) -->
+    <!-- REAR VIEW SCREEN -->
     <div class="camera-panel" id="panelBack">
         <div class="camera-header">
-            <span class="camera-label">CAMERA 1 [BACK]</span>
+            <div class="cam-header-title">
+                <span class="camera-screen-badge">REAR VIEW</span>
+                <div class="cam-assign-box" title="Select camera hardware device or video for Rear View">
+                    <i class="fas fa-video cam-icon"></i>
+                    <select class="cam-screen-select" id="selectSrcBack" onchange="assignScreenCamera('back', this.value)">
+                        <option value="1">Camera 1 (USB Camera)</option>
+                    </select>
+                </div>
+            </div>
             <div class="camera-status">
                 <span class="status-dot" id="dotBack"></span>
-                <span id="statusTextBack">OFFLINE</span>
+                <span id="statusTextBack">CAM OFF</span>
             </div>
         </div>
-        <div class="camera-feed" onclick="selectCameraView('back')" style="cursor:pointer;" title="Click to focus on Camera 1 [Back]">
-            <img id="feedBack" src="" alt="Rear Camera">
+        <div class="camera-feed" onclick="selectCameraView('back')" style="cursor:pointer;" title="Click to expand Rear View">
+            <img id="feedBack" src="" alt="Rear Camera Feed">
+            <div class="cam-off-overlay" id="overlayBack">
+                <i class="fas fa-video-slash cam-off-icon"></i>
+                <span class="cam-off-text">CAMERA OFF</span>
+                <small class="cam-off-assigned" id="assignedLabelBack">Assigned: Camera 1</small>
+            </div>
         </div>
         <div class="camera-info">
             <span id="motionBack">—</span>
@@ -88,17 +114,30 @@
         </div>
     </div>
 
-    <!-- LEFT (Camera 2) -->
+    <!-- LEFT VIEW SCREEN -->
     <div class="camera-panel" id="panelLeft">
         <div class="camera-header">
-            <span class="camera-label">CAMERA 2 [LEFT]</span>
+            <div class="cam-header-title">
+                <span class="camera-screen-badge">LEFT VIEW</span>
+                <div class="cam-assign-box" title="Select camera hardware device or video for Left View">
+                    <i class="fas fa-video cam-icon"></i>
+                    <select class="cam-screen-select" id="selectSrcLeft" onchange="assignScreenCamera('left', this.value)">
+                        <option value="3">Camera 3 (USB Camera)</option>
+                    </select>
+                </div>
+            </div>
             <div class="camera-status">
                 <span class="status-dot" id="dotLeft"></span>
-                <span id="statusTextLeft">OFFLINE</span>
+                <span id="statusTextLeft">CAM OFF</span>
             </div>
         </div>
-        <div class="camera-feed" onclick="selectCameraView('left')" style="cursor:pointer;" title="Click to focus on Camera 2 [Left]">
-            <img id="feedLeft" src="" alt="Left Camera">
+        <div class="camera-feed" onclick="selectCameraView('left')" style="cursor:pointer;" title="Click to expand Left View">
+            <img id="feedLeft" src="" alt="Left Camera Feed">
+            <div class="cam-off-overlay" id="overlayLeft">
+                <i class="fas fa-video-slash cam-off-icon"></i>
+                <span class="cam-off-text">CAMERA OFF</span>
+                <small class="cam-off-assigned" id="assignedLabelLeft">Assigned: Camera 3</small>
+            </div>
         </div>
         <div class="camera-info">
             <span id="motionLeft">—</span>
@@ -106,17 +145,30 @@
         </div>
     </div>
 
-    <!-- RIGHT (Camera 3) -->
+    <!-- RIGHT VIEW SCREEN -->
     <div class="camera-panel" id="panelRight">
         <div class="camera-header">
-            <span class="camera-label">CAMERA 3 [RIGHT]</span>
+            <div class="cam-header-title">
+                <span class="camera-screen-badge">RIGHT VIEW</span>
+                <div class="cam-assign-box" title="Select camera hardware device or video for Right View">
+                    <i class="fas fa-video cam-icon"></i>
+                    <select class="cam-screen-select" id="selectSrcRight" onchange="assignScreenCamera('right', this.value)">
+                        <option value="2">Camera 2 (USB Camera)</option>
+                    </select>
+                </div>
+            </div>
             <div class="camera-status">
                 <span class="status-dot" id="dotRight"></span>
-                <span id="statusTextRight">OFFLINE</span>
+                <span id="statusTextRight">CAM OFF</span>
             </div>
         </div>
-        <div class="camera-feed" onclick="selectCameraView('right')" style="cursor:pointer;" title="Click to focus on Camera 3 [Right]">
-            <img id="feedRight" src="" alt="Right Camera">
+        <div class="camera-feed" onclick="selectCameraView('right')" style="cursor:pointer;" title="Click to expand Right View">
+            <img id="feedRight" src="" alt="Right Camera Feed">
+            <div class="cam-off-overlay" id="overlayRight">
+                <i class="fas fa-video-slash cam-off-icon"></i>
+                <span class="cam-off-text">CAMERA OFF</span>
+                <small class="cam-off-assigned" id="assignedLabelRight">Assigned: Camera 2</small>
+            </div>
         </div>
         <div class="camera-info">
             <span id="motionRight">—</span>
@@ -128,7 +180,7 @@
 <!-- Controls -->
 <div class="capture-controls">
     <button class="btn btn-success btn-lg" id="btnStart" onclick="startCapture()">
-        <i class="fas fa-play"></i> START CAPTURE
+        <i class="fas fa-power-off"></i> START LIVE VIEW &amp; CAPTURE
     </button>
     <button class="btn" id="btnPause" onclick="pauseCapture()" disabled>
         <i class="fas fa-pause"></i> PAUSE
@@ -137,7 +189,10 @@
         <i class="fas fa-play"></i> RESUME
     </button>
     <button class="btn btn-danger" id="btnStop" onclick="stopCapture()" disabled>
-        <i class="fas fa-stop"></i> STOP SESSION
+        <i class="fas fa-stop"></i> STOP (CAMERAS OFF)
+    </button>
+    <button class="btn btn-warning" id="btnReset" onclick="resetCapture()">
+        <i class="fas fa-undo"></i> RESET
     </button>
     <button class="btn btn-warning" id="btnReset" onclick="resetCapture()">
         <i class="fas fa-undo"></i> RESET

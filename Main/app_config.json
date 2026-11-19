@@ -13,5 +13,9 @@
   "capture_cooldown": 5,
   "device": "auto",
   "video_dir": "D:\\Project Costal star\\Videos",
-  "database_dir": "D:\\Project Costal star\\Data_base"
+  "database_dir": "D:\\Project Costal star\\Data_base",
+  "camera_sources": {
+    "front": "0",
+    "left": "3"
+  }
 }
