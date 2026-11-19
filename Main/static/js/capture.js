@@ -28,24 +28,15 @@ async function loadAvailableCameras(forceRefresh = false) {
                 ? String(currentCameraMapping[cam].source)
                 : '';
 
-            // Build options
-            let optsHtml = '';
-
-            // 1. Hardware Devices
-            optsHtml += '<optgroup label="Physical Connected Cameras">';
+            // Build options for live cameras
+            let optsHtml = '<optgroup label="Select Live Camera">';
             availableDevicesList.forEach(dev => {
                 const isSelected = (assignedSource === dev.id || assignedSource === String(dev.index));
-                const badge = dev.connected ? '● ' : '○ ';
-                const statusSuffix = dev.connected ? ' (Connected)' : ' (Not Detected)';
+                const badge = dev.connected ? '🟢 ' : '🔴 ';
+                const statusSuffix = dev.connected ? ' (LIVE CONNECTED)' : ' (NO SIGNAL)';
                 optsHtml += `<option value="${dev.id}" ${isSelected ? 'selected' : ''}>${badge}${dev.label}${statusSuffix}</option>`;
             });
             optsHtml += '</optgroup>';
-
-            // 2. Demo Video File option
-            const isVideoSelected = assignedSource.startsWith('video') || assignedSource.endsWith('.mp4');
-            optsHtml += `<optgroup label="Prerecorded File Fallback">
-                <option value="video_${cam}" ${isVideoSelected ? 'selected' : ''}>📁 Prerecorded Video (${cam}.mp4)</option>
-            </optgroup>`;
 
             selectEl.innerHTML = optsHtml;
 

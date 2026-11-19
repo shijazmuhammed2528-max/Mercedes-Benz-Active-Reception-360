@@ -16,8 +16,8 @@
   "database_dir": "D:\\Project Costal star\\Data_base",
   "camera_sources": {
     "front": "0",
-    "back": "video_back",
-    "left": "video_left",
-    "right": "video_right"
+    "back": "1",
+    "left": "2",
+    "right": "3"
   }
 }

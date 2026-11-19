@@ -1,6 +1,7 @@
 """
 Video Manager — Manages four camera video streams with OpenCV.
-Provides thread-safe frame access, synchronized playback, and MJPEG streaming.
+Provides thread-safe hardware camera capture sharing, dynamic device assignment,
+and clean live camera streaming without silent fallback to recorded videos.
 """
 import os
 import cv2
@@ -13,25 +14,123 @@ from collections import deque
 logger = logging.getLogger(__name__)
 
 
-class CameraStream:
-    """Manages a single camera video stream."""
+class HardwareDeviceManager:
+    """
+    Centralized, thread-safe hardware capture pool.
+    Allows multiple visual screens to share any physical webcam device (e.g. Camera 0),
+    preventing Windows DirectShow exclusive device lock conflicts.
+    """
+    _instance = None
+    _lock = threading.Lock()
 
-    def __init__(self, name: str, video_path: str, label: str):
+    def __init__(self):
+        self._devices = {}  # dev_idx -> cv2.VideoCapture
+        self._latest_frames = {}  # dev_idx -> np.ndarray
+        self._dev_locks = {}
+        self._resolutions = {}
+
+    @classmethod
+    def get_instance(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = HardwareDeviceManager()
+            return cls._instance
+
+    def open_device(self, dev_idx: int) -> bool:
+        with self._lock:
+            if dev_idx in self._devices and self._devices[dev_idx] is not None and self._devices[dev_idx].isOpened():
+                return True
+
+            backend = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
+            try:
+                cap = cv2.VideoCapture(dev_idx, backend)
+                if cap is not None and cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        self._devices[dev_idx] = cap
+                        self._latest_frames[dev_idx] = frame.copy()
+                        self._dev_locks[dev_idx] = threading.Lock()
+                        self._resolutions[dev_idx] = (frame.shape[1], frame.shape[0])
+                        logger.info("HardwareDeviceManager: Successfully opened Camera %d (%dx%d)",
+                                    dev_idx, frame.shape[1], frame.shape[0])
+                        return True
+                    else:
+                        cap.release()
+            except Exception as e:
+                logger.warning("HardwareDeviceManager: Error probing Camera %d: %s", dev_idx, e)
+
+            logger.info("HardwareDeviceManager: Camera %d is not connected", dev_idx)
+            return False
+
+    def is_device_open(self, dev_idx: int) -> bool:
+        with self._lock:
+            return dev_idx in self._devices and self._devices[dev_idx].isOpened()
+
+    def read_frame(self, dev_idx: int) -> tuple[bool, np.ndarray | None]:
+        with self._lock:
+            cap = self._devices.get(dev_idx)
+            if cap is None or not cap.isOpened():
+                return False, None
+            d_lock = self._dev_locks.get(dev_idx)
+
+        if d_lock:
+            with d_lock:
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    self._latest_frames[dev_idx] = frame
+                    return True, frame
+                return False, self._latest_frames.get(dev_idx)
+        return False, None
+
+    def get_resolution(self, dev_idx: int) -> tuple[int, int]:
+        with self._lock:
+            return self._resolutions.get(dev_idx, (640, 480))
+
+    def release_device(self, dev_idx: int):
+        with self._lock:
+            cap = self._devices.pop(dev_idx, None)
+            if cap:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+            self._latest_frames.pop(dev_idx, None)
+            self._dev_locks.pop(dev_idx, None)
+
+    def release_all(self):
+        with self._lock:
+            for dev_idx, cap in list(self._devices.items()):
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+            self._devices.clear()
+            self._latest_frames.clear()
+            self._dev_locks.clear()
+            logger.info("HardwareDeviceManager: Released all physical cameras")
+
+
+class CameraStream:
+    """Manages a single camera view screen."""
+
+    def __init__(self, name: str, video_path: str | int, label: str):
         self.name = name
         self.video_path = video_path
         self.label = label
-        self.cap = None
+        self.cap = None  # Used only if explicitly streaming a video file
         self.lock = threading.Lock()
         self.current_frame = None
         self.original_frame = None  # Unmodified frame for capture
         self.frame_number = 0
         self.total_frames = 0
         self.fps = 24.0
-        self.width = 0
-        self.height = 0
+        self.width = 640
+        self.height = 480
         self.is_open = False
+        self.is_connected = False
         self.is_playing = False
         self.frame_buffer = deque(maxlen=30)  # Buffer for best-frame selection
+        self.hw_manager = HardwareDeviceManager.get_instance()
 
         # Detection state (updated by capture controller)
         self.detection = None
@@ -41,11 +140,8 @@ class CameraStream:
         self.is_view_ok = False
         self.is_stationary = False
         self.confidence = 0.0
-        self._using_fallback = False
 
     def _is_device_source(self) -> bool:
-        if getattr(self, "_using_fallback", False):
-            return False
         if isinstance(self.video_path, int):
             return True
         if isinstance(self.video_path, str) and self.video_path.strip().isdigit():
@@ -59,95 +155,121 @@ class CameraStream:
 
     def open(self) -> bool:
         with self.lock:
-            self._using_fallback = False
             is_device = self._is_device_source()
-            if not is_device and not os.path.isfile(str(self.video_path)):
-                from config import VIDEO_SOURCES
-                fallback_file = VIDEO_SOURCES.get(self.name)
-                if fallback_file and os.path.isfile(fallback_file):
-                    self.video_path = fallback_file
-                    is_device = False
+            if is_device:
+                dev_idx = self._get_device_index()
+                # Open via shared hardware device manager (no silent fallback to video files!)
+                opened = self.hw_manager.open_device(dev_idx)
+                self.is_connected = opened
+                self.is_open = True
+                if opened:
+                    w, h = self.hw_manager.get_resolution(dev_idx)
+                    self.width = w
+                    self.height = h
+                    logger.info("Screen '%s' connected to physical Camera %d (%dx%d)", self.name, dev_idx, w, h)
                 else:
+                    self.width = 640
+                    self.height = 360
+                    logger.info("Screen '%s' assigned to Camera %d (Device not plugged in)", self.name, dev_idx)
+                return True
+            else:
+                # Explicit video file (only if user explicitly chose it)
+                if not os.path.isfile(str(self.video_path)):
                     logger.error("Video file not found: %s", self.video_path)
                     return False
-            try:
-                if is_device:
-                    dev_idx = self._get_device_index()
-                    backend = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
-                    self.cap = cv2.VideoCapture(dev_idx, backend)
-                    if self.cap is None or not self.cap.isOpened():
-                        from config import VIDEO_SOURCES
-                        fallback_file = VIDEO_SOURCES.get(self.name)
-                        if fallback_file and os.path.isfile(fallback_file):
-                            logger.warning("Camera index %s not connected for %s view. Falling back to %s",
-                                           self.video_path, self.name, fallback_file)
-                            self.cap = cv2.VideoCapture(fallback_file)
-                            self._using_fallback = True
-                            is_device = False
-                else:
-                    self.cap = cv2.VideoCapture(self.video_path)
-
+                self.cap = cv2.VideoCapture(self.video_path)
                 if self.cap is None or not self.cap.isOpened():
                     logger.error("Cannot open stream: %s", self.video_path)
                     return False
-
-                self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 24.0
-                if self.fps <= 0 or self.fps > 120:
-                    self.fps = 24.0
                 self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) if not is_device else 0
+                self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 24.0
+                self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 self.is_open = True
-                self.frame_number = 0
-                logger.info("Opened %s (source: %s, fallback=%s): %dx%d, %.1f fps",
-                            self.name, str(self.video_path), self._using_fallback, self.width, self.height, self.fps)
+                self.is_connected = True
                 return True
-            except Exception as e:
-                logger.error("Error opening %s: %s", self.video_path, e)
-                return False
 
     def set_source(self, new_source: str | int) -> bool:
         """Dynamically update source for this camera screen."""
         with self.lock:
             was_open = self.is_open
-            if was_open and self.cap:
-                self.cap.release()
-                self.cap = None
+            if was_open:
+                if self.cap:
+                    self.cap.release()
+                    self.cap = None
                 self.is_open = False
             self.video_path = new_source
-            self._using_fallback = False
             if was_open:
                 return self.open()
             return True
 
+    def _create_no_signal_frame(self) -> np.ndarray:
+        """Generate clean, high-tech 'NO CAMERA SIGNAL' visual frame."""
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        frame[:] = (15, 15, 15)
+        # Background grid
+        for y in range(0, 360, 45):
+            cv2.line(frame, (0, y), (640, y), (25, 25, 25), 1)
+        for x in range(0, 640, 64):
+            cv2.line(frame, (x, 0), (x, 360), (25, 25, 25), 1)
+
+        dev_idx = self._get_device_index() if self._is_device_source() else self.video_path
+        cv2.putText(frame, self.label, (24, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (220, 220, 220), 2)
+        cv2.putText(frame, f"CAMERA {dev_idx}: NO VIDEO SIGNAL", (110, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 140, 255), 2)
+        cv2.putText(frame, f"Connect USB Camera {dev_idx} or select Camera 0 from list", (115, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (130, 130, 130), 1)
+        # Red disconnected status indicator
+        cv2.circle(frame, (640 - 24, 24), 8, (0, 0, 255), -1)
+        return frame
+
     def read_frame(self) -> bool:
         with self.lock:
-            if self.cap is None or not self.cap.isOpened():
+            if not self.is_open:
                 return False
-            ret, frame = self.cap.read()
-            if not ret:
-                # Loop video file seamlessly
-                if not self._is_device_source():
+
+            if self._is_device_source():
+                dev_idx = self._get_device_index()
+                if self.is_connected:
+                    ret, frame = self.hw_manager.read_frame(dev_idx)
+                    if ret and frame is not None:
+                        self.original_frame = frame.copy()
+                        self.current_frame = frame
+                        self.frame_number += 1
+                        self.frame_buffer.append(self.original_frame.copy())
+                        return True
+                    else:
+                        self.current_frame = self._create_no_signal_frame()
+                        return True
+                else:
+                    self.current_frame = self._create_no_signal_frame()
+                    return True
+            else:
+                if self.cap is None or not self.cap.isOpened():
+                    return False
+                ret, frame = self.cap.read()
+                if not ret:
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     self.frame_number = 0
                     ret, frame = self.cap.read()
                     if not ret:
                         return False
-                else:
-                    return False
-            self.original_frame = frame.copy()
-            self.current_frame = frame
-            self.frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) if not self._is_device_source() else self.frame_number + 1
-            # Add to buffer for best-frame selection
-            self.frame_buffer.append(self.original_frame.copy())
-            return True
+                self.original_frame = frame.copy()
+                self.current_frame = frame
+                self.frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+                self.frame_buffer.append(self.original_frame.copy())
+                return True
 
     def get_display_frame(self) -> np.ndarray | None:
         """Get current frame with detection overlays drawn."""
         with self.lock:
             if self.current_frame is None:
+                if self._is_device_source() and not self.is_connected:
+                    return self._create_no_signal_frame()
                 return None
             frame = self.current_frame.copy()
+
+        # If device is not connected, return the clean no-signal frame
+        if self._is_device_source() and not self.is_connected:
+            return frame
 
         # Draw detection overlay
         if self.detection and self.is_detected:
@@ -179,7 +301,13 @@ class CameraStream:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
 
         # Status indicator dot
-        status_color = (0, 255, 102) if self.is_detected else (0, 140, 255)
+        if self.is_detected:
+            status_color = (0, 255, 102)  # Green
+        elif self.is_connected:
+            status_color = (0, 140, 255)  # Amber / Blue
+        else:
+            status_color = (0, 0, 255)    # Red
+
         cv2.circle(frame, (frame.shape[1] - 20, 22), 9, status_color, -1)
         cv2.circle(frame, (frame.shape[1] - 20, 22), 9, (255, 255, 255), 1)
 
@@ -208,6 +336,7 @@ class CameraStream:
                 self.cap = None
             self.is_open = False
             self.is_playing = False
+            self.is_connected = False
             self.current_frame = None
             self.original_frame = None
 
@@ -217,6 +346,7 @@ class CameraStream:
             "name": self.name,
             "label": self.label,
             "is_open": self.is_open,
+            "is_connected": self.is_connected,
             "is_playing": self.is_playing,
             "is_device": is_dev,
             "file_exists": True if is_dev else os.path.isfile(str(self.video_path)),
@@ -235,7 +365,7 @@ class CameraStream:
 
 
 class VideoManager:
-    """Manages all four camera streams."""
+    """Manages all four camera screens and hardware device access."""
 
     def __init__(self, video_sources: dict, camera_labels: dict):
         self.cameras = {}
@@ -278,6 +408,7 @@ class VideoManager:
     def release_all(self):
         for cam in self.cameras.values():
             cam.release()
+        HardwareDeviceManager.get_instance().release_all()
 
     def get_camera(self, name: str) -> CameraStream | None:
         return self.cameras.get(name)

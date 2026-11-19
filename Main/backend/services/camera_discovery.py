@@ -17,7 +17,7 @@ _cache_timestamp: float = 0.0
 _cache_lock = threading.Lock()
 CACHE_TTL = 60.0  # seconds
 
-def probe_hardware_cameras(max_devices: int = 4, currently_open_indices: set = None) -> List[Dict[str, Any]]:
+def probe_hardware_cameras(max_devices: int = 6, currently_open_indices: set = None) -> List[Dict[str, Any]]:
     """
     Probe video device indices via DirectShow on Windows.
     Quickly discovers connected webcams without blocking or conflicting with active streams.
@@ -27,14 +27,17 @@ def probe_hardware_cameras(max_devices: int = 4, currently_open_indices: set = N
     if currently_open_indices is None:
         currently_open_indices = set()
 
+    from backend.capture.video_manager import HardwareDeviceManager
+    hw_mgr = HardwareDeviceManager.get_instance()
+
     for idx in range(max_devices):
         is_connected = False
         width, height = 0, 0
 
-        # If already open and active in VideoManager, don't re-open (prevents DirectShow conflict)
-        if idx in currently_open_indices:
+        # If already open and active in HardwareDeviceManager, don't re-open
+        if idx in currently_open_indices or hw_mgr.is_device_open(idx):
             is_connected = True
-            width, height = 640, 480
+            width, height = hw_mgr.get_resolution(idx)
         else:
             try:
                 cap = cv2.VideoCapture(idx, backend)
@@ -77,7 +80,7 @@ def get_available_cameras(video_sources: dict = None, force_refresh: bool = Fals
         now = time.time()
         if force_refresh or (now - _cache_timestamp > CACHE_TTL) or not _cached_cameras:
             try:
-                _cached_cameras = probe_hardware_cameras(max_devices=4, currently_open_indices=currently_open_indices)
+                _cached_cameras = probe_hardware_cameras(max_devices=6, currently_open_indices=currently_open_indices)
                 _cache_timestamp = now
                 logger.info("Probed hardware cameras: %d connected of %d checked",
                             sum(1 for c in _cached_cameras if c["connected"]),
