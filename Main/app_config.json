@@ -1,10 +1,10 @@
 {
-  "yolo_model": "yolov8n.pt",
+  "yolo_model": "yolov8s.pt",
   "yolo_confidence": 0.35,
   "yolo_process_fps": 30,
   "yolo_inference_size": 640,
   "stationary_duration": 2,
-  "capture_delay_seconds": 0.0,
+  "capture_delay_seconds": 1.0,
   "center_move_threshold": 15,
   "size_change_threshold": 0.08,
   "view_margin_ratio": 0.03,

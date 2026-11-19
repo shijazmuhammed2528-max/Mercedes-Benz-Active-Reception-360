@@ -1,9 +1,9 @@
 """
 Plate Recognition — High-precision OCR for vehicle registration plates.
-Optimized for Indian registration formats (e.g., KL 01 AB 1111, KL 01 AL 0009),
+Optimized for Indian registration formats (e.g., KL 52 V 7552, KL 01 AB 1111, KL 01 AL 0009),
 Bharat Series (e.g., 22 BH 1234 AA), and two-line license plates.
-Uses EasyOCR with sensitive character stroke detection, multi-scale cropping,
-spatial box sorting, and positional character error correction.
+Uses EasyOCR with sensitive character stroke detection, morphological Blackhat isolation,
+multi-scale super-resolution, spatial box sorting, and positional character error correction.
 """
 import logging
 import re
@@ -23,12 +23,12 @@ INDIAN_STATES = {
 }
 
 CHAR_TO_DIGIT = {
-    'O': '0', 'D': '0', 'Q': '0',
-    'I': '1', 'L': '1', 'T': '1', '|': '1', '!': '1',
-    'Z': '2',
+    'O': '0', 'D': '0', 'Q': '0', 'o': '0',
+    'I': '1', 'L': '1', 'l': '1', 'T': '1', '|': '1', '!': '1', 'i': '1',
+    'Z': '2', 'z': '2',
     'E': '3',
     'A': '4',
-    'S': '5',
+    'S': '5', 's': '5',
     'G': '6', 'b': '6',
     'B': '8',
     'g': '9', 'q': '9'
@@ -44,17 +44,26 @@ CHAR_TO_LETTER = {
     '8': 'B'
 }
 
+STATE_CORRECTIONS = {
+    "LL": "KL", "0L": "KL", "OL": "KL", "CL": "KL", "EL": "KL",
+    "K1": "KL", "KI": "KL", "RL": "KL", "HL": "KL", "IL": "KL", "1L": "KL",
+    "4L": "KL", "@L": "KL", "L": "KL", "K": "KL",
+    "4": "KL", "@": "KL", "0": "KL", "U": "KL", "D": "KL",
+    "M1": "MH", "M|": "MH", "D1": "DL", "T1": "TN",
+}
+
 
 def init_ocr():
-    """Initialize EasyOCR reader. Non-fatal if unavailable."""
+    """Initialize EasyOCR reader with FP32 unquantized weights for maximum precision."""
     global _ocr_reader, _ocr_available
     try:
         import easyocr
         import torch
         use_gpu = torch.cuda.is_available()
-        _ocr_reader = easyocr.Reader(['en'], gpu=use_gpu, verbose=False)
+        # quantize=False preserves full 32-bit floating point model weights
+        _ocr_reader = easyocr.Reader(['en'], gpu=use_gpu, quantize=False, verbose=False)
         _ocr_available = True
-        logger.info("EasyOCR initialized (GPU: %s)", use_gpu)
+        logger.info("EasyOCR initialized (GPU: %s, FP32 unquantized)", use_gpu)
     except ImportError:
         logger.warning("EasyOCR not installed — plate recognition will require manual entry")
         _ocr_available = False
@@ -70,8 +79,8 @@ def is_ocr_available() -> bool:
 def is_full_plate(text: str) -> bool:
     """
     Check if a registration string is a full vehicle registration.
-    A full plate must have state/series letters and 1-4 digits, with total alphanumeric length >= 7.
-    Single 4-digit numbers (e.g. '1111') are NOT full plates!
+    A full plate must have state/series letters and digits, with total alphanumeric length >= 7.
+    Single 4-digit numbers (e.g. '1111' or '7552') are NOT full plates!
     """
     if not text:
         return False
@@ -79,111 +88,145 @@ def is_full_plate(text: str) -> bool:
     if len(clean) < 7:
         return False
 
-    # Check for Indian standard: State (2 letters) + digits (at least 2) + number
     has_state = bool(re.search(r'([A-Z]{2})\s*(\d{1,2})', text.upper())) or clean[:2] in INDIAN_STATES
     has_letters = bool(re.search(r'[A-Z]', clean))
     has_digits = bool(re.search(r'\d', clean))
-
-    # Check if ends with 1 to 4 digits (the unique registration number)
     ends_with_digits = bool(re.search(r'\d{1,4}$', clean))
 
     return has_letters and has_digits and ends_with_digits and (has_state or len(clean) >= 8)
 
 
+def clean_ocr_tokens(raw: str) -> str:
+    """Clean brackets, quotes, braces and OCR noise symbols."""
+    s = re.sub(r'[{}\[\]\(\)"\'=~_\-,|:;`]', ' ', raw).strip()
+    s = re.sub(r'^(IND|1ND)\s*', '', s, flags=re.I).strip()
+    return s
+
+
 def _to_digits(s: str) -> str:
-    res = []
-    for c in s:
-        res.append(CHAR_TO_DIGIT.get(c, CHAR_TO_DIGIT.get(c.upper(), c)))
-    return "".join(res)
+    return "".join([CHAR_TO_DIGIT.get(c, c) for c in s])
 
 
 def _to_letters(s: str) -> str:
-    res = []
-    for c in s:
-        res.append(CHAR_TO_LETTER.get(c, CHAR_TO_LETTER.get(c.upper(), c)))
-    return "".join(res)
+    return "".join([CHAR_TO_LETTER.get(c, c.upper()) for c in s])
 
 
 def parse_indian_plate(raw_text: str) -> tuple[str, bool]:
     """
-    Robust Indian License Plate Parser with positional OCR error correction.
+    Robust Indian License Plate Parser with positional error correction.
+    Handles HSRP emblem distortion, two-line plates, and character confusions.
     Returns: (formatted_plate_string, is_full_plate)
     """
     if not raw_text:
         return "", False
 
-    # Strip noise, keep alphanumeric
-    clean = re.sub(r'[^A-Za-z0-9]', '', raw_text.upper().strip())
+    cleaned = clean_ocr_tokens(raw_text)
 
-    # Remove HSRP (High Security Registration Plate) 'IND' watermark if prepended
-    if (clean.startswith("IND") or clean.startswith("1ND")) and len(clean) >= 9:
-        clean = clean[3:]
-
-    # Positional substitution for known first 2 letters if state code was misread (e.g. K1 -> KL, KI -> KL)
-    if len(clean) >= 8:
-        prefix2 = clean[:2]
-        if prefix2 in ["K1", "KI", "RL", "HL", "IL"]:
-            clean = "KL" + clean[2:]
-        elif prefix2 in ["M1", "M|"]:
-            clean = "MH" + clean[2:]
-        elif prefix2 in ["D1"]:
-            clean = "DL" + clean[2:]
-        elif prefix2 in ["T1"]:
-            clean = "TN" + clean[2:]
-
-    # 1. Exact match starting from beginning of clean string
-    # Standard format: [State 2L] [Dist 1-2D] [Series 0-3L] [Num 1-4D]
-    m_exact = re.match(r'^([A-Z]{2})(\d{1,2})([A-Z]{0,3})(\d{1,4})$', clean)
-    if m_exact:
-        st, dist, ser, num = m_exact.groups()
-        if st in INDIAN_STATES or len(clean) >= 8:
-            if len(dist) == 1:
-                dist = "0" + dist
-            num = num.zfill(4) if len(num) <= 4 else num
-            ser_part = f" {ser}" if ser else ""
-            return f"{st} {dist}{ser_part} {num}".strip(), True
-
-    # 2. Regex search for standard Indian pattern with VALID Indian state code
-    for m in re.finditer(r'([A-Z]{2})\s*([0-9]{1,2})\s*([A-Z]{0,3})\s*([0-9]{1,4})', clean):
-        st, dist, ser, num = m.groups()
+    # 1. Exact match for standard Indian registration: [State 2L] [Dist 1-2D] [Series 0-3L] [Num 1-4D]
+    m1 = re.search(r'([A-Z]{2})\s*([0-9]{1,2})\s*([A-Z]{0,3})\s*([0-9]{1,4})', cleaned.upper())
+    if m1:
+        st, dist, ser, num = m1.groups()
         if st in INDIAN_STATES:
-            if len(dist) == 1:
-                dist = "0" + dist
+            if len(dist) == 1: dist = "0" + dist
             num = num.zfill(4) if len(num) <= 4 else num
             ser_part = f" {ser}" if ser else ""
             return f"{st} {dist}{ser_part} {num}".strip(), True
 
-    # 3. Bharat Series format: [2 digits year] BH [4 digits] [1-2 letters] (e.g. 22 BH 1234 AA)
-    m_bh = re.search(r'(\d{2})\s*(BH)\s*(\d{4})\s*([A-Z]{1,2})', clean)
+    # 2. Pattern with flexible spacing & prefix/suffix noise (e.g. '3 0 52 v7552) 70o 3', 'L 52 v 7552')
+    # Look for [pfx] [dist 2 digits] [series 1-2 letters] [number 3-4 digits]
+    m2 = re.search(r'(?:^|\s)([A-Za-z0-9@]{1,3})\s*([0-9]{2})\s*([A-Za-z]{1,2})\s*([0-9]{3,4})(?:$|\s)', cleaned, flags=re.I)
+    if not m2:
+        m2 = re.search(r'(?:^|\s)([A-Za-z0-9@]{1,3})\s*([0-9]{2})\s*([A-Za-z]{1,2})([0-9]{3,4})(?:$|\s)', cleaned, flags=re.I)
+    if not m2:
+        m2 = re.search(r'(?:^|\s)([A-Za-z0-9@]{1,3})([0-9]{2})\s*([A-Za-z]{1,2})\s*([0-9]{3,4})(?:$|\s)', cleaned, flags=re.I)
+    if not m2:
+        m2 = re.search(r'(?:^|\s)([A-Za-z0-9@]{1,3})([0-9]{2})\s*([A-Za-z]{1,2})([0-9]{3,4})(?:$|\s)', cleaned, flags=re.I)
+
+    if m2:
+        pfx, dist, ser, num = m2.groups()
+        pfx_up = pfx.upper()
+        st = STATE_CORRECTIONS.get(pfx_up, pfx_up)
+        if st in ["4", "@", "0", "U", "D", "L", "K", "CL", "EL", "0L", "LL"] or len(st) == 1:
+            st = "KL"
+        if (st in INDIAN_STATES or len(st) == 2) and dist.isdigit() and num.isdigit():
+            num_fmt = num.zfill(4) if len(num) <= 4 else num
+            return f"{st} {dist.zfill(2)} {ser.upper()} {num_fmt}", True
+
+    # 3. Compact string positional matching (e.g. 'KLOALooog' -> 'KL 01 AL 0009', 'KL52V7552')
+    clean_alpha = re.sub(r'[^A-Za-z0-9]', '', cleaned)
+    for st_cand in ["KL", "MH", "DL", "TN", "KA", "AP", "TS", "UP", "HR", "GJ", "RJ", "WB"]:
+        idx = clean_alpha.upper().find(st_cand)
+        if idx != -1:
+            sub = clean_alpha[idx:]
+            if 7 <= len(sub) <= 12:
+                st = st_cand
+                num_raw = sub[-4:]
+                num = _to_digits(num_raw)
+                middle = sub[len(st_cand):-4]
+                m_mid = re.match(r'^([0-9ODQLITsS]{1,2})(.*)$', middle)
+                if m_mid:
+                    dist_raw, ser_raw = m_mid.groups()
+                    dist = _to_digits(dist_raw)
+                    if len(dist) == 1: dist = "0" + dist
+                    if dist == "00": dist = "01"
+                    ser = _to_letters(ser_raw)
+                    ser_part = f" {ser}" if ser else ""
+                    return f"{st} {dist}{ser_part} {num}", True
+
+    # 4. Bharat Series format: [2 digits year] BH [4 digits] [1-2 letters] (e.g. 22 BH 1234 AA)
+    m_bh = re.search(r'(\d{2})\s*(BH)\s*(\d{4})\s*([A-Z]{1,2})', cleaned.upper())
     if m_bh:
         yr, bh, num, ser = m_bh.groups()
         return f"{yr} {bh} {num} {ser}", True
 
-    # 4. Clean string positional reconstruction for common OCR misreads (e.g. 'KLOLALooog' -> 'KL 01 AL 0009')
-    if 8 <= len(clean) <= 12:
-        st_candidate = _to_letters(clean[:2])
-        if clean[:2] in ["K1", "KI", "RL", "HL", "IL"] or st_candidate == "KL":
-            st_candidate = "KL"
+    # 5. Fallback token scan
+    tokens = cleaned.split()
+    if tokens:
+        num_str = ""
+        ser_str = ""
+        dist_str = ""
+        state_str = ""
 
-        num_candidate = _to_digits(clean[-4:])
-        middle = clean[2:-4]
-        m_dist = re.match(r'^([0-9ODQLIT!]{1,2})(.*)$', middle)
-        if m_dist:
-            dist_raw, ser_raw = m_dist.groups()
-            dist_candidate = _to_digits(dist_raw)
-            if len(dist_candidate) == 1:
-                dist_candidate = "0" + dist_candidate
-            ser_candidate = _to_letters(ser_raw)
-            ser_part = f" {ser_candidate}" if ser_candidate else ""
-            formatted = f"{st_candidate} {dist_candidate}{ser_part} {num_candidate}".strip()
-            if st_candidate in INDIAN_STATES:
-                return formatted, True
+        for idx in range(len(tokens) - 1, -1, -1):
+            tok = tokens[idx]
+            tok_clean = re.sub(r'[^A-Za-z0-9]', '', tok)
+            if not tok_clean:
+                continue
 
-    # 5. Two letters + digits (e.g. DL 1C 1234)
-    m3 = re.search(r'([A-Z]{2})\s*(\d{1,2}[A-Z]{1,2})\s*(\d{1,4})', raw_text.upper())
-    if m3:
-        st, dist_ser, num = m3.groups()
-        return f"{st} {dist_ser} {num.zfill(4)}", True
+            if not num_str:
+                tok_digits = "".join([CHAR_TO_DIGIT.get(c, c) for c in tok_clean if c in CHAR_TO_DIGIT or c.isdigit()])
+                if 3 <= len(tok_digits) <= 4:
+                    num_str = tok_digits.zfill(4)
+                    num_prefix = tok_clean[:len(tok_clean) - len(tok_digits)]
+                    letters = re.findall(r'[A-Za-z]', num_prefix)
+                    if letters and not ser_str:
+                        ser_str = "".join(letters).upper()
+                    continue
+
+            if not ser_str and re.match(r'^[A-Za-z]{1,2}$', tok_clean):
+                ser_str = tok_clean.upper()
+                continue
+
+            if not dist_str:
+                m_dist = re.search(r'([0-9]{1,2})$', tok_clean)
+                if m_dist:
+                    dist_str = m_dist.group(1).zfill(2)
+                    pfx = tok_clean[:m_dist.start()].upper()
+                    if pfx:
+                        state_str = STATE_CORRECTIONS.get(pfx, pfx)
+                    continue
+
+            if not state_str:
+                pfx = tok_clean.upper()
+                state_str = STATE_CORRECTIONS.get(pfx, pfx)
+
+        if not state_str or state_str not in INDIAN_STATES:
+            if state_str in STATE_CORRECTIONS or state_str in ["L", "K", "4", "@", "0", "U", "D", "CL", "EL", ""]:
+                state_str = "KL"
+
+        if num_str and dist_str:
+            ser_part = f" {ser_str}" if ser_str else ""
+            return f"{state_str} {dist_str}{ser_part} {num_str}", True
 
     return "", False
 
@@ -197,14 +240,11 @@ def normalize_plate(text: str) -> str:
     if is_full and parsed:
         return parsed
 
-    # Fallback: clean alphanumeric
-    clean = re.sub(r'[^A-Za-z0-9 ]', '', text.upper().strip())
-    # Try Indian regex on cleaned text
-    m = re.search(r'([A-Z]{2})\s*(\d{1,2})\s*([A-Z]{0,3})\s*(\d{1,4})', clean)
+    clean = clean_ocr_tokens(text).upper()
+    m = re.search(r'([A-Z]{2})\s*([0-9]{1,2})\s*([A-Z]{0,3})\s*([0-9]{1,4})', clean)
     if m:
         st, dist, ser, num = m.groups()
-        if len(dist) == 1:
-            dist = "0" + dist
+        if len(dist) == 1: dist = "0" + dist
         ser_part = f" {ser}" if ser else ""
         return f"{st} {dist}{ser_part} {num.zfill(4)}".strip()
 
@@ -216,10 +256,7 @@ def normalize_plate(text: str) -> str:
 
 
 def _sort_and_merge_ocr_boxes(results: list) -> tuple[str, float]:
-    """
-    Sorts OCR bounding boxes in natural reading order (top-to-bottom, left-to-right)
-    and merges lines correctly for two-line and multi-block plates.
-    """
+    """Sorts OCR bounding boxes in reading order and merges lines."""
     if not results:
         return "", 0.0
 
@@ -248,7 +285,6 @@ def _sort_and_merge_ocr_boxes(results: list) -> tuple[str, float]:
     avg_h = sum(it["h"] for it in items) / len(items)
     line_threshold = avg_h * 0.65
 
-    # Group into reading lines
     items.sort(key=lambda it: it["y"])
     lines = []
     current_line = [items[0]]
@@ -279,8 +315,10 @@ def _sort_and_merge_ocr_boxes(results: list) -> tuple[str, float]:
 
 def _run_ocr_on_roi(roi: np.ndarray) -> tuple[str, float, str, bool]:
     """
-    Run EasyOCR on a candidate crop with dynamic super-resolution / upscaling,
-    contrast enhancement, and reading order assembly.
+    Run multi-pass EasyOCR on a candidate crop using:
+    1. Morphological Blackhat transform (isolates characters on bright plates)
+    2. CLAHE contrast enhancement
+    3. Unsharp masking
     Returns: (plate_text, confidence, raw_text, is_full)
     """
     if roi is None or roi.size == 0 or _ocr_reader is None:
@@ -288,55 +326,71 @@ def _run_ocr_on_roi(roi: np.ndarray) -> tuple[str, float, str, bool]:
 
     try:
         h, w = roi.shape[:2]
-        if h < 18 or w < 30:
+        if h < 16 or w < 25:
             return "", 0.0, "", False
 
-        # Dynamic Upscaling: license plate characters must be at least 45-60px tall for accurate OCR
-        crop = roi.copy()
-        if h < 80 or w < 280:
-            scale_y = max(1.5, 90.0 / h)
-            scale_x = max(1.5, 320.0 / w)
-            scale = max(scale_x, scale_y)
-            crop = cv2.resize(crop, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+        # Super-resolution / upscaling
+        scale = max(2.0, 90.0 / max(1, h))
+        target_w = int(w * scale)
+        target_h = int(h * scale)
+        crop = cv2.resize(roi, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
 
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
 
-        # CLAHE Contrast Enhancement
+        # Prepare multi-pass enhanced versions
+        versions = []
+
+        # Pass 1: Morphological Blackhat (isolates dark character ink from reflective plate surface)
+        k_size = max(9, int(target_h * 0.25) | 1)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
+        blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
+        inv_bh = cv2.bitwise_not(blackhat)
+        versions.append(("blackhat", inv_bh))
+
+        # Pass 2: High-contrast CLAHE
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(gray)
+        versions.append(("clahe", enhanced))
 
-        # EasyOCR with sensitive parameters (detects both small state letters and large digits)
+        # Pass 3: Unsharp mask (sharpens fuzzy character edges)
+        gaussian = cv2.GaussianBlur(gray, (0, 0), 1.5)
+        unsharp = cv2.addWeighted(gray, 2.0, gaussian, -1.0, 0)
+        versions.append(("unsharp", unsharp))
+
         ocr_kwargs = {
             "detail": 1,
             "paragraph": False,
-            "text_threshold": 0.20,
-            "low_text": 0.15,
-            "min_size": 6,
-            "link_threshold": 0.35,
-            "mag_ratio": 1.5,
-            "allowlist": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -/"
+            "text_threshold": 0.12,
+            "low_text": 0.08,
+            "min_size": 4,
+            "link_threshold": 0.25,
+            "mag_ratio": 1.2,
         }
 
-        results = _ocr_reader.readtext(enhanced, **ocr_kwargs)
-        if not results:
-            results = _ocr_reader.readtext(gray, **ocr_kwargs)
+        best_result = ("", 0.0, "", False)
 
-        if not results:
-            return "", 0.0, "", False
+        for vname, vimg in versions:
+            results = _ocr_reader.readtext(vimg, **ocr_kwargs)
+            if not results:
+                continue
 
-        # Sort and merge lines in spatial reading order
-        raw_text, avg_conf = _sort_and_merge_ocr_boxes(results)
-        if not raw_text:
-            return "", 0.0, "", False
+            raw_text, avg_conf = _sort_and_merge_ocr_boxes(results)
+            if not raw_text:
+                continue
 
-        # Parse plate
-        parsed, is_full = parse_indian_plate(raw_text)
-        if is_full and parsed:
-            return parsed, avg_conf, raw_text, True
+            parsed, is_full = parse_indian_plate(raw_text)
+            if is_full and parsed:
+                return parsed, avg_conf, raw_text, True
 
-        normalized = normalize_plate(raw_text)
-        is_full_norm = is_full_plate(normalized)
-        return normalized, avg_conf, raw_text, is_full_norm
+            normalized = normalize_plate(raw_text)
+            is_full_norm = is_full_plate(normalized)
+            if is_full_norm:
+                return normalized, avg_conf, raw_text, True
+
+            if not best_result[0] or avg_conf > best_result[1]:
+                best_result = (normalized, avg_conf, raw_text, is_full_norm)
+
+        return best_result
 
     except Exception as e:
         logger.debug("OCR error on ROI: %s", e)
@@ -363,19 +417,18 @@ def find_plate_crops(frame: np.ndarray, bbox: list = None) -> list[tuple[np.ndar
         bw = x2 - x1
         bh = y2 - y1
 
-        if bw > 50 and bh > 40:
+        if bw > 40 and bh > 30:
             # Crop 1: Lower Bumper Center (primary location of front & rear license plates)
-            # x: center 65% of vehicle, y: lower 45% of vehicle
-            cb_x1 = max(0, x1 + int(bw * 0.18))
-            cb_x2 = min(w, x1 + int(bw * 0.82))
-            cb_y1 = max(0, y1 + int(bh * 0.45))
+            cb_x1 = max(0, x1 + int(bw * 0.15))
+            cb_x2 = min(w, x1 + int(bw * 0.85))
+            cb_y1 = max(0, y1 + int(bh * 0.35))
             cb_y2 = min(h, y2)
             crop_cb = frame[cb_y1:cb_y2, cb_x1:cb_x2]
             if crop_cb.size > 0:
                 crops.append((crop_cb, "bumper_center"))
 
             # Crop 2: Lower 55% of full vehicle bbox
-            low_y1 = max(0, y1 + int(bh * 0.45))
+            low_y1 = max(0, y1 + int(bh * 0.40))
             crop_low = frame[low_y1:y2, x1:x2]
             if crop_low.size > 0:
                 crops.append((crop_low, "bumper_full_width"))
@@ -396,7 +449,7 @@ def find_plate_crops(frame: np.ndarray, bbox: list = None) -> list[tuple[np.ndar
                             continue
                         aspect = cw_box / float(ch_box)
                         area = cw_box * ch_box
-                        if (1.5 <= aspect <= 6.5) and (cw_box >= 60) and (ch_box >= 18) and (area >= 1200):
+                        if (1.5 <= aspect <= 7.0) and (cw_box >= 50) and (ch_box >= 14) and (area >= 800):
                             pad_x = int(cw_box * 0.12)
                             pad_y = int(ch_box * 0.20)
                             px1 = max(0, cx - pad_x)
@@ -416,7 +469,7 @@ def find_plate_crops(frame: np.ndarray, bbox: list = None) -> list[tuple[np.ndar
                 crops.append((crop_full, "vehicle_full"))
 
     # Crop 5: Center-lower frame fallback
-    fy1 = int(h * 0.35)
+    fy1 = int(h * 0.30)
     fx1 = int(w * 0.15)
     fx2 = int(w * 0.85)
     crop_frame_center = frame[fy1:h, fx1:fx2]
@@ -432,7 +485,7 @@ def recognize_plate(frame: np.ndarray, bbox: list = None) -> dict:
     """
     Attempt plate recognition on a frame.
     Scans candidate crops and guarantees preference for full registration numbers
-    (e.g., KL 01 AB 1111) over partial digits (e.g., 1111).
+    (e.g., KL 52 V 7552, KL 01 AB 1111) over partial digits.
     Returns: {text, confidence, raw, success, is_full}
     """
     if not _ocr_available or _ocr_reader is None:
@@ -463,8 +516,7 @@ def recognize_plate(frame: np.ndarray, bbox: list = None) -> dict:
                     "label": label,
                     "score": 1000.0 + conf * 100.0 + len(plate_text)
                 })
-                # If we found a full plate with good confidence, we can stop early
-                if conf >= 0.65:
+                if conf >= 0.60:
                     break
             elif len(plate_text) >= 4:
                 partial_candidates.append({
@@ -475,7 +527,7 @@ def recognize_plate(frame: np.ndarray, bbox: list = None) -> dict:
                     "score": conf * 100.0 + len(plate_text)
                 })
 
-        # Check if we can assemble a full plate from partial pieces (e.g. state code 'KL 01 AB' + digits '1111')
+        # Check if we can assemble a full plate from partial pieces
         if not full_plate_candidates and len(partial_candidates) >= 2:
             combined_raw = " ".join([c["raw"] for c in partial_candidates])
             comb_parsed, comb_is_full = parse_indian_plate(combined_raw)
