@@ -264,10 +264,10 @@ async function uploadAndAnalyze() {
     executeUploadAndAnalyze();
 }
 
+let activeUploadReport = null;
+
 async function executeUploadAndAnalyze() {
     const btn = document.getElementById('btnAnalyze');
-    const resultsCard = document.getElementById('resultsCard');
-    const saveToDb = document.getElementById('checkSaveDb').checked;
     const plateOverride = document.getElementById('plateOverride').value.trim();
 
     btn.disabled = true;
@@ -278,7 +278,8 @@ async function executeUploadAndAnalyze() {
         formData.append(item.cameraView, item.file);
     });
 
-    formData.append('save_to_database', saveToDb ? 'true' : 'false');
+    // Always analyze first without saving to DB directly — user review & confirmation required
+    formData.append('save_to_database', 'false');
     if (plateOverride) {
         formData.append('vehicle_number', plateOverride);
     }
@@ -298,28 +299,215 @@ async function executeUploadAndAnalyze() {
             return;
         }
 
-        currentUploadedSessionId = data.session_id;
+        // Show the Analysis Report Confirmation Modal with the 3 options (OK, CANCEL, RETRY)
+        showUploadReportModal(data);
 
-        // Render Results
-        resultsCard.style.display = 'block';
+    } catch (err) {
+        console.error('Upload error:', err);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-microchip"></i> ANALYZE ALL VIEWS (REVIEW REPORT BEFORE SAVE)';
+        alert('Server communication error during media analysis');
+    }
+}
 
-        // Plate Banner & Input
-        const plate = data.plate_text || 'UNKNOWN';
-        const plateEl = document.getElementById('resPlate');
-        plateEl.textContent = plate;
-        plateEl.style.color = (plate === 'UNKNOWN') ? 'var(--warning)' : 'var(--success)';
+function showUploadReportModal(data) {
+    activeUploadReport = data;
+    currentUploadedSessionId = data.session_id;
 
-        const plateInput = document.getElementById('resPlateInput');
-        if (plateInput) plateInput.value = (plate === 'UNKNOWN') ? '' : plate;
+    // 1. Set Header Bumper Plate & Date/Time (Small size in header)
+    const plateInput = document.getElementById('reportPlateInput');
+    const displayPlate = (data.plate_text && data.plate_text !== 'UNKNOWN') ? data.plate_text : '';
+    if (plateInput) {
+        plateInput.value = displayPlate;
+        plateInput.placeholder = displayPlate || 'ENTER REGISTRATION';
+    }
 
-        document.getElementById('resMetaRight').innerHTML = `
-            <div><strong>Total Files:</strong> ${data.total_files}</div>
-            <div><strong>Status:</strong> ${data.saved ? '<span style="color:var(--success)">Stored in Data_base</span>' : 'Analysis Only'}</div>
+    const dtEl = document.getElementById('reportDateTimeText');
+    if (dtEl) {
+        dtEl.textContent = `${data.capture_date} | ${data.capture_time_12h}`;
+    }
+
+    const metaRight = document.getElementById('reportFilesMeta');
+    if (metaRight) {
+        metaRight.textContent = `${data.total_files} MEDIA FILES ANALYZED • 4 VIEWS VERIFIED`;
+    }
+
+    // 2. Render 4 Camera Views Grid (2x2) with Detection & Sharpness
+    const grid = document.getElementById('reportCamsGrid');
+    const cams = data.cameras || {};
+    const camOrder = ['front', 'back', 'left', 'right'];
+    const camLabels = {
+        front: 'CAM 01 — FRONT VIEW',
+        back: 'CAM 02 — REAR VIEW',
+        left: 'CAM 03 — LEFT SIDE VIEW',
+        right: 'CAM 04 — RIGHT SIDE VIEW'
+    };
+
+    grid.innerHTML = camOrder.map(c => {
+        const info = cams[c] || {};
+        const det = info.detection || {};
+        const isDetected = info.vehicle_detected;
+        const detBadge = isDetected 
+            ? `<span style="color:var(--success, #38ef7d); font-weight:700;"><i class="fas fa-check-circle"></i> ${(det.class_name || 'CAR').toUpperCase()} (${Math.round(det.confidence * 100)}%)</span>`
+            : `<span style="color:var(--warning, #f5a623);"><i class="fas fa-exclamation-triangle"></i> No vehicle detected</span>`;
+
+        const formatTag = info.is_video ? `VIDEO (${info.duration_seconds}s)` : 'PHOTO';
+
+        return `
+            <div class="confirm-card">
+                <div class="confirm-card-bar">
+                    <span>${camLabels[c]}</span>
+                    <span class="confirm-card-badge">${formatTag}</span>
+                </div>
+                <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox('data:image/jpeg;base64,${info.preview_b64 || ''}')">
+                    ${info.preview_b64 ? `
+                        <img src="data:image/jpeg;base64,${info.preview_b64}" alt="${c}">
+                    ` : `
+                        <div style="height:100%; display:flex; align-items:center; justify-content:center; color:#555; font-size:12px;">NO SIGNAL</div>
+                    `}
+                </div>
+                <div style="padding:6px 10px; font-size:11px; display:flex; justify-content:space-between; align-items:center; background:#0e1013; border-top:1px solid rgba(255,255,255,0.05);">
+                    <div>${detBadge}</div>
+                    <div style="color:#8894a0; font-size:10px; font-weight:600;">Sharpness: ${info.sharpness || '—'}</div>
+                </div>
+            </div>
         `;
+    }).join('');
 
-        // Render 4-Camera Grid (2x2)
-        const grid = document.getElementById('fourCamResultsGrid');
-        const cams = data.cameras || {};
+    // 3. Open Modal
+    const modal = document.getElementById('uploadReportModal');
+    if (modal) {
+        modal.classList.add('active');
+    }
+
+    if (!displayPlate && plateInput) {
+        setTimeout(() => plateInput.focus(), 150);
+    }
+}
+
+function closeUploadReportModal() {
+    const modal = document.getElementById('uploadReportModal');
+    if (modal) modal.classList.remove('active');
+}
+
+// Option 1: CANCEL
+async function cancelUploadAnalysis() {
+    if (activeUploadReport && activeUploadReport.session_id) {
+        try {
+            await fetch('/api/vehicle/upload/discard', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: activeUploadReport.session_id })
+            });
+        } catch (e) {}
+    }
+    closeUploadReportModal();
+    activeUploadReport = null;
+    if (typeof showGlobalToast === 'function') {
+        showGlobalToast('Analysis report canceled. Database untouched.', 'warning');
+    }
+}
+
+// Option 2: RETRY
+async function retryUploadAnalysis() {
+    if (activeUploadReport && activeUploadReport.session_id) {
+        try {
+            await fetch('/api/vehicle/upload/discard', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: activeUploadReport.session_id })
+            });
+        } catch (e) {}
+    }
+    closeUploadReportModal();
+    activeUploadReport = null;
+    clearAllFiles();
+    if (typeof showGlobalToast === 'function') {
+        showGlobalToast('Reset media selection. Please choose new videos or photos.', 'info');
+    }
+    // Automatically trigger file selector so user can pick new videos immediately
+    setTimeout(() => {
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput) fileInput.click();
+    }, 200);
+}
+
+// Option 3: OK — SAVE TO DATABASE
+async function confirmUploadToDatabase() {
+    if (!activeUploadReport) return;
+
+    const btn = document.getElementById('btnConfirmReport');
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> SAVING TO DATABASE...';
+    }
+
+    const plateInput = document.getElementById('reportPlateInput');
+    const plate = plateInput ? plateInput.value.trim().toUpperCase() : '';
+    const sid = activeUploadReport.session_id;
+
+    try {
+        const res = await fetch('/api/vehicle/upload/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sid, vehicle_number: plate })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            closeUploadReportModal();
+            const finalPlate = data.vehicle_number || plate || 'RECORD';
+
+            if (typeof showGlobalToast === 'function') {
+                showGlobalToast(`✓ Vehicle ${finalPlate} confirmed & saved to database!`, 'success');
+            }
+
+            // Render Results Card on page
+            renderCompletedUploadResults(activeUploadReport, finalPlate, sid);
+            activeUploadReport = null;
+
+        } else {
+            alert('Failed to save record to database: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Confirm upload error:', e);
+        alert('Server communication error while saving to database.');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
+}
+
+function renderCompletedUploadResults(reportData, plate, sessionId) {
+    const resultsCard = document.getElementById('resultsCard');
+    if (!resultsCard) return;
+
+    resultsCard.style.display = 'block';
+
+    const plateEl = document.getElementById('resPlate');
+    if (plateEl) {
+        plateEl.textContent = plate;
+        plateEl.style.color = 'var(--success, #38ef7d)';
+    }
+
+    const plateInput = document.getElementById('resPlateInput');
+    if (plateInput) plateInput.value = plate;
+
+    const metaRight = document.getElementById('resMetaRight');
+    if (metaRight) {
+        metaRight.innerHTML = `
+            <div><strong>Total Files:</strong> ${reportData.total_files}</div>
+            <div><strong>Status:</strong> <span style="color:var(--success, #38ef7d); font-weight:700;"><i class="fas fa-check-circle"></i> Stored in Database</span></div>
+            <div><strong>Time:</strong> ${reportData.capture_date} — ${reportData.capture_time_12h}</div>
+        `;
+    }
+
+    // Populate 4 camera cards on results card
+    const grid = document.getElementById('fourCamResultsGrid');
+    if (grid && reportData.cameras) {
         const camOrder = ['front', 'back', 'left', 'right'];
         const camLabels = {
             front: 'CAM 01 — FRONT VIEW',
@@ -329,13 +517,12 @@ async function executeUploadAndAnalyze() {
         };
 
         grid.innerHTML = camOrder.map(c => {
-            const info = cams[c] || {};
+            const info = reportData.cameras[c] || {};
             const det = info.detection || {};
             const isDetected = info.vehicle_detected;
             const detBadge = isDetected 
                 ? `<span style="color:var(--success); font-weight:700;"><i class="fas fa-check-circle"></i> ${(det.class_name || 'CAR').toUpperCase()} (${Math.round(det.confidence * 100)}%)</span>`
                 : `<span style="color:var(--warning);"><i class="fas fa-exclamation-triangle"></i> No vehicle detected</span>`;
-
             const formatTag = info.is_video ? `VIDEO (${info.duration_seconds}s)` : 'PHOTO';
 
             return `
@@ -358,26 +545,29 @@ async function executeUploadAndAnalyze() {
                 </div>
             `;
         }).join('');
-
-        // Action links
-        const actionsDiv = document.getElementById('savedActionBtns');
-        if (data.saved && data.session_id) {
-            document.getElementById('btnOpenSession').href = `/vehicle/${data.session_id}`;
-            actionsDiv.style.display = 'flex';
-        } else {
-            actionsDiv.style.display = 'none';
-        }
-
-        // Scroll into view
-        resultsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-    } catch (err) {
-        console.error('Upload error:', err);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-microchip"></i> ANALYZE ALL VIEWS &amp; STORE VEHICLE';
-        alert('Server communication error during media analysis');
     }
+
+    const actionsDiv = document.getElementById('savedActionBtns');
+    if (actionsDiv && sessionId) {
+        document.getElementById('btnOpenSession').href = `/vehicle/${sessionId}`;
+        actionsDiv.style.display = 'flex';
+    }
+
+    resultsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
+
+// Keyboard shortcuts for upload report modal
+window.addEventListener('keydown', (e) => {
+    const modal = document.getElementById('uploadReportModal');
+    if (!modal || !modal.classList.contains('active')) return;
+
+    if (e.key === 'Escape') {
+        cancelUploadAnalysis();
+    } else if (e.key === 'Enter' && e.target && e.target.id === 'reportPlateInput') {
+        e.preventDefault();
+        confirmUploadToDatabase();
+    }
+});
 
 async function saveUploadPlate() {
     const input = document.getElementById('resPlateInput');

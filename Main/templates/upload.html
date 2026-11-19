@@ -81,8 +81,8 @@
                 </label>
             </div>
 
-            <button type="button" class="btn btn-success btn-lg" id="btnAnalyze" onclick="uploadAndAnalyze()" disabled style="width:100%; justify-content:center;">
-                <i class="fas fa-microchip"></i> ANALYZE ALL VIEWS &amp; STORE VEHICLE
+            <button type="button" class="btn btn-primary btn-lg" id="btnAnalyze" onclick="uploadAndAnalyze()" disabled style="width:100%; justify-content:center; font-weight:700;">
+                <i class="fas fa-microchip"></i> ANALYZE ALL VIEWS (REVIEW REPORT BEFORE SAVE)
             </button>
         </div>
     </div>
@@ -165,8 +165,76 @@
         </div>
     </div>
 </div>
+
+<!-- Vehicle Video Analysis Report & Confirmation Modal (Same like Live Capture with OK, CANCEL, RETRY) -->
+<div class="confirm-modal-overlay" id="uploadReportModal">
+    <div class="confirm-modal-card" style="width: 1040px;">
+        <!-- Header: Small size bumper plate and date/time in header -->
+        <div class="confirm-modal-header">
+            <div class="confirm-header-left">
+                <div class="confirm-title-badge">
+                    <i class="fas fa-file-invoice" style="color:#00c0f0;"></i>
+                    <span>VEHICLE ANALYSIS REPORT</span>
+                </div>
+
+                <div class="confirm-header-meta">
+                    <div class="confirm-plate-box" title="Vehicle bumper plate (editable before saving)">
+                        <span class="confirm-meta-label"><i class="fas fa-id-card"></i> BUMPER PLATE:</span>
+                        <input type="text" id="reportPlateInput" class="confirm-plate-input" placeholder="ENTER REGISTRATION" maxlength="20" title="Click to edit registration number before saving">
+                    </div>
+                    <div class="confirm-datetime-box" title="Analysis date & time">
+                        <span class="confirm-meta-label"><i class="far fa-clock"></i> DATE &amp; TIME:</span>
+                        <span id="reportDateTimeText" class="confirm-datetime-val">—</span>
+                    </div>
+                </div>
+            </div>
+            <button type="button" class="confirm-close-btn" onclick="cancelUploadAnalysis()" title="Cancel and close report">&times;</button>
+        </div>
+
+        <!-- Body: 4 Camera Inspection Views Analysis Report -->
+        <div class="confirm-modal-body">
+            <!-- Summary Banner -->
+            <div style="background: rgba(0, 192, 240, 0.06); border: 1px solid rgba(0, 192, 240, 0.25); border-radius: 6px; padding: 10px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div style="font-size: 0.8rem; color: #c5d0d8; display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-check-circle" style="color: #00c0f0; font-size: 1rem;"></i>
+                    <span><strong>Analysis Completed:</strong> All camera video views processed with YOLO vehicle detection and license plate recognition.</span>
+                </div>
+                <div id="reportFilesMeta" style="font-size: 0.75rem; color: #8894a0; font-weight: 600;">
+                    4/4 VIEWS VERIFIED
+                </div>
+            </div>
+
+            <!-- 4 Camera Views Grid (2x2) -->
+            <div class="confirm-grid-4" id="reportCamsGrid">
+                <!-- Dynamically populated: FRONT, REAR, LEFT, RIGHT with bounding boxes & badges -->
+            </div>
+        </div>
+
+        <!-- Footer: The 3 Options: CANCEL, RETRY, OK -->
+        <div class="confirm-modal-footer">
+            <div class="confirm-footer-hint">
+                <i class="fas fa-info-circle"></i>
+                <span>Review analysis report. Click <strong>OK</strong> to commit to database, <strong>CANCEL</strong> to discard, or <strong>RETRY</strong> to pick new videos.</span>
+            </div>
+            <div class="confirm-footer-actions">
+                <!-- Option 1: CANCEL -->
+                <button type="button" class="btn btn-outline" id="btnCancelReport" onclick="cancelUploadAnalysis()" style="border-color:#555; color:#ccc;">
+                    <i class="fas fa-times"></i> CANCEL
+                </button>
+                <!-- Option 2: RETRY -->
+                <button type="button" class="btn" id="btnRetryReport" onclick="retryUploadAnalysis()" style="background:rgba(245, 166, 35, 0.15); border:1px solid rgba(245, 166, 35, 0.45); color:#f5a623; font-weight:700;">
+                    <i class="fas fa-redo-alt"></i> RETRY
+                </button>
+                <!-- Option 3: OK (SAVE TO DATABASE) -->
+                <button type="button" class="btn btn-success" id="btnConfirmReport" onclick="confirmUploadToDatabase()" style="background:#00c0f0; color:#000; font-weight:700; border:none; padding:8px 22px;">
+                    <i class="fas fa-check-circle"></i> OK — SAVE TO DATABASE
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/upload.js"></script>
+<script src="/static/js/upload.js?v=2.0"></script>
 {% endblock %}

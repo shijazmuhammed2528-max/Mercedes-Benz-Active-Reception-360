@@ -316,82 +316,58 @@ def process_multi_vehicle_media(
                 "simulated": True
             }
 
-    # Save to Database if requested
+    # Prepare session metadata and staging folder
     saved = False
-    session_id = None
-    folder_path = None
+    now = datetime.now()
+    capture_date = now.strftime("%Y-%m-%d")
+    capture_time_12h = now.strftime("%I:%M:%S %p")
+    capture_timestamp = now.isoformat()
+    session_id = f"batch_{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
-    if save_to_database and database_dir and db_manager:
+    # Always stage photos into _pending folder for review & confirmation before committing to database
+    pending_folder = os.path.join(database_dir, "_pending", session_id) if database_dir else None
+    confidences = {}
+    sharpness_scores = {}
+
+    if pending_folder:
         try:
-            now = datetime.now()
-            capture_date = now.strftime("%Y-%m-%d")
-            capture_time_12h = now.strftime("%I:%M:%S %p")
-            capture_timestamp = now.isoformat()
-            session_id = f"batch_{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-
-            norm_plate = final_plate.replace(" ", "_").replace("-", "")
-            time_tag = capture_time_12h.replace(":", "-").replace(" ", "_")
-            folder_name = f"{norm_plate}_{capture_date}_{time_tag}"
-            folder_path = os.path.join(database_dir, folder_name)
-            os.makedirs(folder_path, exist_ok=True)
-
-            # Save clean unannotated photos for all 4 views
-            confidences = {}
+            os.makedirs(pending_folder, exist_ok=True)
             for cam in ["front", "back", "left", "right"]:
                 cam_res = results_by_cam.get(cam, {})
                 frame_to_save = cam_res.get("clean_frame", primary_frame)
                 if frame_to_save is not None:
-                    dest = os.path.join(folder_path, f"{cam}.jpg")
-                    cv2.imwrite(dest, frame_to_save)
+                    dest = os.path.join(pending_folder, f"{cam}.jpg")
+                    cv2.imwrite(dest, frame_to_save, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
                 det = cam_res.get("detection") or {}
                 confidences[cam] = round(float(det.get("confidence", 0.85)), 4)
+                sharpness_scores[cam] = round(float(cam_res.get("sharpness", 50.0)), 1)
 
-            # Metadata JSON
-            metadata = {
+            pending_meta = {
                 "session_id": session_id,
                 "vehicle_number": final_plate,
-                "vehicle_number_normalized": final_plate.replace(" ", "").replace("-", ""),
                 "capture_date": capture_date,
-                "capture_timestamp": capture_timestamp,
                 "capture_time_12h": capture_time_12h,
-                "source": "multi_file_browser_upload",
-                "total_uploaded_files": len(files_data),
-                "detection_confidences": confidences,
-                "files": {
-                    "front": os.path.join(folder_path, "front.jpg"),
-                    "back": os.path.join(folder_path, "back.jpg"),
-                    "left": os.path.join(folder_path, "left.jpg"),
-                    "right": os.path.join(folder_path, "right.jpg"),
-                }
+                "capture_timestamp": capture_timestamp,
+                "confidences": confidences,
+                "sharpness": sharpness_scores,
+                "total_files": len(files_data),
             }
-            with open(os.path.join(folder_path, "metadata.json"), "w") as f:
-                json.dump(metadata, f, indent=2)
-
-            # Insert into SQLite Database
-            db_manager.insert_session({
-                "session_id": session_id,
-                "vehicle_number": final_plate,
-                "vehicle_number_normalized": final_plate.replace(" ", "").replace("-", ""),
-                "capture_date": capture_date,
-                "capture_timestamp": capture_timestamp,
-                "capture_time_12h": capture_time_12h,
-                "folder_path": folder_path,
-                "front_image_path": os.path.join(folder_path, "front.jpg"),
-                "back_image_path": os.path.join(folder_path, "back.jpg"),
-                "left_image_path": os.path.join(folder_path, "left.jpg"),
-                "right_image_path": os.path.join(folder_path, "right.jpg"),
-                "front_confidence": confidences.get("front", 0.85),
-                "back_confidence": confidences.get("back", 0.85),
-                "left_confidence": confidences.get("left", 0.85),
-                "right_confidence": confidences.get("right", 0.85),
-                "capture_status": "success",
-            })
-
-            saved = True
-            logger.info("Multi-media vehicle capture saved: %s -> %s", session_id, folder_path)
+            with open(os.path.join(pending_folder, "pending_meta.json"), "w") as f:
+                json.dump(pending_meta, f, indent=2)
         except Exception as e:
-            logger.error("Failed to save multi-media session: %s", e, exc_info=True)
+            logger.error("Failed staging upload media: %s", e)
+
+    folder_path = None
+    if save_to_database and database_dir and db_manager:
+        commit_res = confirm_upload_media(
+            session_id=session_id,
+            database_dir=database_dir,
+            db_manager=db_manager,
+            vehicle_number=final_plate
+        )
+        saved = commit_res.get("success", False)
+        folder_path = commit_res.get("folder_path")
 
     # Strip clean_frame numpy arrays before JSON serialization
     serialized_cams = {}
@@ -405,7 +381,126 @@ def process_multi_vehicle_media(
         "total_files": len(files_data),
         "plate_text": final_plate,
         "saved": saved,
+        "is_pending_confirmation": not saved,
         "session_id": session_id,
         "folder_path": folder_path,
+        "capture_date": capture_date,
+        "capture_time_12h": capture_time_12h,
         "cameras": serialized_cams,
+        "confidences": confidences,
+        "sharpness": sharpness_scores,
     }
+
+
+def confirm_upload_media(
+    session_id: str,
+    database_dir: str,
+    db_manager,
+    vehicle_number: str = ""
+) -> dict:
+    """
+    Commit a staged pending upload into the permanent database folder and SQLite database.
+    """
+    import shutil
+    pending_folder = os.path.join(database_dir, "_pending", session_id)
+    if not os.path.isdir(pending_folder):
+        return {"success": False, "error": f"Pending session {session_id} not found."}
+
+    meta_file = os.path.join(pending_folder, "pending_meta.json")
+    pending_meta = {}
+    if os.path.isfile(meta_file):
+        try:
+            with open(meta_file, "r") as f:
+                pending_meta = json.load(f)
+        except Exception:
+            pass
+
+    final_plate = vehicle_number.strip().upper() if vehicle_number.strip() else pending_meta.get("vehicle_number", "UNKNOWN")
+    if not final_plate:
+        final_plate = "UNKNOWN"
+
+    capture_date = pending_meta.get("capture_date", datetime.now().strftime("%Y-%m-%d"))
+    capture_time_12h = pending_meta.get("capture_time_12h", datetime.now().strftime("%I:%M:%S %p"))
+    capture_timestamp = pending_meta.get("capture_timestamp", datetime.now().isoformat())
+    confidences = pending_meta.get("confidences", {"front": 0.85, "back": 0.85, "left": 0.85, "right": 0.85})
+
+    norm_plate = final_plate.replace(" ", "_").replace("-", "")
+    time_tag = capture_time_12h.replace(":", "-").replace(" ", "_")
+    folder_name = f"{norm_plate}_{capture_date}_{time_tag}"
+    final_folder = os.path.join(database_dir, folder_name)
+    os.makedirs(final_folder, exist_ok=True)
+
+    # Copy 4 images from pending to final folder
+    for cam in ["front", "back", "left", "right"]:
+        src = os.path.join(pending_folder, f"{cam}.jpg")
+        dst = os.path.join(final_folder, f"{cam}.jpg")
+        if os.path.isfile(src):
+            try:
+                shutil.copy2(src, dst)
+            except Exception as e:
+                logger.error("Error copying %s to %s: %s", src, dst, e)
+
+    # Save final metadata.json
+    metadata = {
+        "session_id": session_id,
+        "vehicle_number": final_plate,
+        "vehicle_number_normalized": final_plate.replace(" ", "").replace("-", ""),
+        "capture_date": capture_date,
+        "capture_timestamp": capture_timestamp,
+        "capture_time_12h": capture_time_12h,
+        "source": "multi_file_browser_upload",
+        "detection_confidences": confidences,
+        "files": {
+            "front": os.path.join(final_folder, "front.jpg"),
+            "back": os.path.join(final_folder, "back.jpg"),
+            "left": os.path.join(final_folder, "left.jpg"),
+            "right": os.path.join(final_folder, "right.jpg"),
+        }
+    }
+    with open(os.path.join(final_folder, "metadata.json"), "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    # Insert into SQLite Database
+    db_manager.insert_session({
+        "session_id": session_id,
+        "vehicle_number": final_plate,
+        "vehicle_number_normalized": final_plate.replace(" ", "").replace("-", ""),
+        "capture_date": capture_date,
+        "capture_timestamp": capture_timestamp,
+        "capture_time_12h": capture_time_12h,
+        "folder_path": final_folder,
+        "front_image_path": os.path.join(final_folder, "front.jpg"),
+        "back_image_path": os.path.join(final_folder, "back.jpg"),
+        "left_image_path": os.path.join(final_folder, "left.jpg"),
+        "right_image_path": os.path.join(final_folder, "right.jpg"),
+        "front_confidence": confidences.get("front", 0.85),
+        "back_confidence": confidences.get("back", 0.85),
+        "left_confidence": confidences.get("left", 0.85),
+        "right_confidence": confidences.get("right", 0.85),
+        "capture_status": "success",
+    })
+
+    # Clean up pending staging
+    shutil.rmtree(pending_folder, ignore_errors=True)
+    logger.info("Confirmed upload media saved to database: %s -> %s", session_id, final_folder)
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "vehicle_number": final_plate,
+        "folder_path": final_folder,
+        "capture_date": capture_date,
+        "capture_time_12h": capture_time_12h
+    }
+
+
+def discard_upload_media(session_id: str, database_dir: str) -> dict:
+    """Discard a staged pending upload and remove temporary files."""
+    import shutil
+    pending_folder = os.path.join(database_dir, "_pending", session_id)
+    if os.path.isdir(pending_folder):
+        try:
+            shutil.rmtree(pending_folder, ignore_errors=True)
+        except Exception as e:
+            logger.warning("Error deleting pending folder %s: %s", pending_folder, e)
+    return {"success": True, "message": "Staged upload discarded."}

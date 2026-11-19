@@ -112,7 +112,7 @@ def api_upload_vehicle():
     # Limit to maximum 4 files
     files_data = files_data[:4]
 
-    save_to_db = request.form.get("save_to_database", "true").lower() == "true"
+    save_to_db = request.form.get("save_to_database", "false").lower() == "true"
     plate_override = request.form.get("vehicle_number", "").strip()
 
     cfg = load_config()
@@ -128,6 +128,34 @@ def api_upload_vehicle():
         yolo_confidence=conf
     )
     return jsonify(result)
+
+@app.route("/api/vehicle/upload/confirm", methods=["POST"])
+def api_upload_confirm():
+    """User confirmed media analysis report — commits record to database."""
+    data = request.get_json() or {}
+    session_id = data.get("session_id", "").strip()
+    vehicle_number = data.get("vehicle_number", "").strip()
+    if not session_id:
+        return jsonify({"success": False, "error": "session_id required"}), 400
+    from backend.services.upload_service import confirm_upload_media
+    res = confirm_upload_media(
+        session_id=session_id,
+        database_dir=DATABASE_DIR,
+        db_manager=db,
+        vehicle_number=vehicle_number
+    )
+    return jsonify(res)
+
+@app.route("/api/vehicle/upload/discard", methods=["POST"])
+def api_upload_discard():
+    """User canceled or retried media analysis — removes staged files."""
+    data = request.get_json() or {}
+    session_id = data.get("session_id", "").strip()
+    if not session_id:
+        return jsonify({"success": True})
+    from backend.services.upload_service import discard_upload_media
+    res = discard_upload_media(session_id=session_id, database_dir=DATABASE_DIR)
+    return jsonify(res)
 
 # ═══════════════════════════════════════════════════════════════
 # API — Dashboard
