@@ -2,6 +2,8 @@
 
 let statusInterval = null;
 let isSessionActive = false;
+let isCameraPowerOn = true;
+let isAutoCaptureActive = true;
 let currentCameraView = 'all';
 let currentCameraMapping = {};
 let availableDevicesList = [];
@@ -70,7 +72,9 @@ async function loadAvailableCameras(forceRefresh = false) {
         });
 
         // Set initial UI state
-        setLiveUIState(Boolean(data.is_live));
+        if (isCameraPowerOn) {
+            setLiveUIState(Boolean(data.is_live));
+        }
 
     } catch (e) {
         console.error('Failed to load available cameras:', e);
@@ -124,9 +128,11 @@ async function assignScreenCamera(screen, source) {
         if (data.success) {
             currentCameraMapping[screen] = { source, connected: true };
             updateScreenAssignedBadge(screen, source);
-            // Reload stream immediately on that screen box
-            const img = document.getElementById('feed' + capitalize(screen));
-            if (img) img.src = `/api/capture/stream/${screen}?t=${Date.now()}`;
+            // Reload stream immediately on that screen box if cameras are powered on
+            if (isCameraPowerOn) {
+                const img = document.getElementById('feed' + capitalize(screen));
+                if (img) img.src = `/api/capture/stream/${screen}?t=${Date.now()}`;
+            }
         } else {
             alert('Failed to assign camera: ' + (data.error || 'Unknown error'));
         }
@@ -206,11 +212,11 @@ function setLiveUIState(isLive) {
         });
     } else {
         if (powerInd) powerInd.classList.remove('active');
-        if (powerText) powerText.textContent = 'CAMERAS STANDBY';
+        if (powerText) powerText.textContent = 'CAMERAS OFF (STANDBY)';
         CAMERAS.forEach(cam => {
             const statusTxt = document.getElementById('statusText' + capitalize(cam));
             if (statusTxt) {
-                statusTxt.textContent = 'STANDBY';
+                statusTxt.textContent = 'OFFLINE';
                 statusTxt.style.color = 'var(--text-muted)';
             }
             const dot = document.getElementById('dot' + capitalize(cam));
@@ -219,7 +225,156 @@ function setLiveUIState(isLive) {
     }
 }
 
-// ─── Capture Controls ──────────────────────────────────────
+// ─── Camera Power Toggle (Single Toggle for All 4 Cameras) ──
+
+async function toggleCameraPower() {
+    isCameraPowerOn = !isCameraPowerOn;
+    const btn = document.getElementById('btnCameraToggle');
+    const icon = document.getElementById('cameraToggleIcon');
+    const text = document.getElementById('cameraToggleText');
+    const grid = document.getElementById('cameraGrid');
+
+    if (isCameraPowerOn) {
+        // TURN CAMERAS ON
+        if (btn) {
+            btn.className = 'btn-camera-toggle power-on';
+        }
+        if (icon) icon.className = 'fas fa-video';
+        if (text) text.textContent = 'CAMERAS: ON (ALL 4 ACTIVE)';
+        if (grid) grid.classList.remove('cameras-off');
+
+        try {
+            await fetch('/api/capture/start', { method: 'POST' });
+        } catch (e) {
+            console.error('Failed to start camera streams:', e);
+        }
+
+        // Restore image feeds with fresh timestamp
+        const now = Date.now();
+        CAMERAS.forEach(cam => {
+            const img = document.getElementById('feed' + capitalize(cam));
+            if (img) {
+                img.style.display = 'block';
+                img.src = `/api/capture/stream/${cam}?t=${now}`;
+            }
+            const statusTxt = document.getElementById('statusText' + capitalize(cam));
+            if (statusTxt) {
+                statusTxt.textContent = 'ONLINE';
+                statusTxt.style.color = 'var(--success)';
+            }
+            const dot = document.getElementById('dot' + capitalize(cam));
+            if (dot) dot.classList.add('active');
+        });
+
+        setLiveUIState(true);
+        startStatusPolling();
+    } else {
+        // TURN CAMERAS OFF (Make all 4 visual screens pitch black)
+        if (btn) {
+            btn.className = 'btn-camera-toggle power-off';
+        }
+        if (icon) icon.className = 'fas fa-video-slash';
+        if (text) text.textContent = 'CAMERAS: OFF (CLICK TO TURN ON)';
+        if (grid) grid.classList.add('cameras-off');
+
+        try {
+            await fetch('/api/capture/stop', { method: 'POST' });
+        } catch (e) {
+            console.error('Failed to stop camera streams:', e);
+        }
+
+        // Make all 4 screens pure black
+        CAMERAS.forEach(cam => {
+            const img = document.getElementById('feed' + capitalize(cam));
+            if (img) {
+                img.src = '';
+                img.style.display = 'none';
+            }
+            const statusTxt = document.getElementById('statusText' + capitalize(cam));
+            if (statusTxt) {
+                statusTxt.textContent = 'POWERED OFF';
+                statusTxt.style.color = 'var(--text-muted)';
+            }
+            const dot = document.getElementById('dot' + capitalize(cam));
+            if (dot) dot.classList.remove('active');
+            const conf = document.getElementById('conf' + capitalize(cam));
+            if (conf) conf.textContent = '—';
+            const motion = document.getElementById('motion' + capitalize(cam));
+            if (motion) motion.textContent = 'OFF';
+        });
+
+        setLiveUIState(false);
+        updateStateIndicator('OFFLINE', 'CAMERAS POWERED OFF (SCREENS BLACK)');
+    }
+}
+
+// ─── AutoCapture Toggle ────────────────────────────────────
+
+async function toggleAutoCapture() {
+    isAutoCaptureActive = !isAutoCaptureActive;
+    const btn = document.getElementById('btnAutoCaptureToggle');
+    const icon = document.getElementById('autoCaptureIcon');
+    const text = document.getElementById('autoCaptureText');
+
+    if (isAutoCaptureActive) {
+        if (btn) btn.className = 'btn-autocapture-toggle active';
+        if (icon) icon.className = 'fas fa-bolt';
+        if (text) text.textContent = 'AUTOCAPTURE: ACTIVE';
+    } else {
+        if (btn) btn.className = 'btn-autocapture-toggle disabled-mode';
+        if (icon) icon.className = 'fas fa-pause-circle';
+        if (text) text.textContent = 'AUTOCAPTURE: PAUSED';
+    }
+
+    try {
+        await fetch('/api/capture/set-autocapture', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: isAutoCaptureActive })
+        });
+    } catch (e) {
+        console.error('Failed to set autocapture:', e);
+    }
+}
+
+// ─── Manual Trigger / Test Validity & Capture Now ──────────
+
+async function triggerValidityCapture() {
+    if (!isCameraPowerOn) {
+        alert('Cameras are powered OFF. Click the CAMERAS toggle button to turn them on first.');
+        return;
+    }
+
+    const btn = document.getElementById('btnTriggerCapture');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> CAPTURING...';
+    }
+
+    try {
+        const res = await fetch('/api/capture/trigger', { method: 'POST' });
+        const data = await res.json();
+
+        if (data.success && data.pending) {
+            if (typeof showConfirmModal === 'function') {
+                showConfirmModal(data.pending);
+            }
+        } else {
+            alert('Capture trigger failed: ' + (data.error || 'No vehicle images available.'));
+        }
+    } catch (e) {
+        console.error('Trigger capture error:', e);
+        alert('Failed to trigger capture');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+}
+
+// ─── Capture Delay Setting ─────────────────────────────────
 
 async function changeCaptureDelay(val) {
     const delay = parseFloat(val);
@@ -236,375 +391,7 @@ async function changeCaptureDelay(val) {
     }
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
-    // 1. Load available cameras and assign screen pickers
-    await loadAvailableCameras(false);
-    startCameraAutoDiscovery();
-
-    // 2. Load capture delay setting
-    try {
-        const res = await fetch('/api/settings');
-        const cfg = await res.json();
-        if (cfg.capture_delay_seconds !== undefined) {
-            const sel = document.getElementById('selectCaptureDelay');
-            if (sel) sel.value = parseFloat(cfg.capture_delay_seconds).toFixed(1);
-        }
-    } catch (e) {}
-
-    // 3. Sync UI with current capture session state — ensure live view runs on Live Capture
-    try {
-        const sRes = await fetch('/api/capture/status');
-        const sData = await sRes.json();
-        const btnStart = document.getElementById('btnStart');
-        const btnPause = document.getElementById('btnPause');
-        const btnStop = document.getElementById('btnStop');
-
-        if (sData.is_running) {
-            setLiveUIState(true);
-            if (btnStart) btnStart.disabled = true;
-            if (btnPause) btnPause.disabled = false;
-            if (btnStop) btnStop.disabled = false;
-            startStatusPolling();
-        } else {
-            // Auto-start live view when entering Live Capture screen!
-            await startCapture();
-        }
-    } catch (e) {
-        startCapture();
-    }
-});
-
-async function startCapture() {
-    try {
-        const btnStart = document.getElementById('btnStart');
-        if (btnStart) btnStart.disabled = true;
-        const successBox = document.getElementById('captureSuccess');
-        if (successBox) successBox.style.display = 'none';
-
-        const res = await fetch('/api/capture/start', { method: 'POST' });
-        const data = await res.json();
-
-        if (data.success) {
-            setLiveUIState(true);
-            const btnPause = document.getElementById('btnPause');
-            const btnStop = document.getElementById('btnStop');
-            if (btnPause) btnPause.disabled = false;
-            if (btnStop) btnStop.disabled = false;
-
-            // Start status polling
-            startStatusPolling();
-        } else {
-            alert('Start failed: ' + (data.error || 'Unknown error'));
-            if (btnStart) btnStart.disabled = false;
-        }
-    } catch (e) {
-        console.error('Start error:', e);
-        const btnStart = document.getElementById('btnStart');
-        if (btnStart) btnStart.disabled = false;
-        alert('Failed to start capture session');
-    }
-}
-
-async function pauseCapture() {
-    try {
-        await fetch('/api/capture/pause', { method: 'POST' });
-        document.getElementById('btnPause').disabled = true;
-        document.getElementById('btnResume').disabled = false;
-    } catch (e) {
-        console.error('Pause error:', e);
-    }
-}
-
-async function resumeCapture() {
-    try {
-        await fetch('/api/capture/resume', { method: 'POST' });
-        document.getElementById('btnPause').disabled = false;
-        document.getElementById('btnResume').disabled = true;
-    } catch (e) {
-        console.error('Resume error:', e);
-    }
-}
-
-async function stopCapture() {
-    try {
-        await fetch('/api/capture/stop', { method: 'POST' });
-        stopStatusPolling();
-        setLiveUIState(false);
-
-        const btnStart = document.getElementById('btnStart');
-        const btnPause = document.getElementById('btnPause');
-        const btnResume = document.getElementById('btnResume');
-        const btnStop = document.getElementById('btnStop');
-
-        if (btnStart) btnStart.disabled = false;
-        if (btnPause) btnPause.disabled = true;
-        if (btnResume) btnResume.disabled = true;
-        if (btnStop) btnStop.disabled = true;
-
-        const stateDot = document.getElementById('stateDot');
-        const stateText = document.getElementById('stateText');
-        if (stateDot) stateDot.className = 'state-dot';
-        if (stateText) stateText.textContent = 'CAMERAS OFF (STANDBY)';
-    } catch (e) {
-        console.error('Stop error:', e);
-    }
-}
-
-async function resetCapture() {
-    try {
-        await fetch('/api/capture/reset', { method: 'POST' });
-        stopStatusPolling();
-        setLiveUIState(false);
-
-        const btnStart = document.getElementById('btnStart');
-        const btnPause = document.getElementById('btnPause');
-        const btnResume = document.getElementById('btnResume');
-        const btnStop = document.getElementById('btnStop');
-
-        if (btnStart) btnStart.disabled = false;
-        if (btnPause) btnPause.disabled = true;
-        if (btnResume) btnResume.disabled = true;
-        if (btnStop) btnStop.disabled = true;
-
-        const successBox = document.getElementById('captureSuccess');
-        if (successBox) successBox.style.display = 'none';
-
-        const now = Date.now();
-        CAMERAS.forEach(cam => {
-            const img = document.getElementById('feed' + capitalize(cam));
-            if (img) img.src = `/api/capture/stream/${cam}?t=${now}`;
-        });
-    } catch (e) {
-        console.error('Reset error:', e);
-    }
-}
-
-        document.getElementById('btnStart').disabled = false;
-        document.getElementById('btnPause').disabled = true;
-        document.getElementById('btnResume').disabled = true;
-        document.getElementById('btnStop').disabled = true;
-        document.getElementById('captureSuccess').style.display = 'none';
-
-        // Clear streams
-        CAMERAS.forEach(cam => {
-            const img = document.getElementById('feed' + capitalize(cam));
-            if (img) img.src = '';
-        });
-
-        // Reset conditions
-        resetConditions();
-        updateStateIndicator('OFFLINE', 'CAMERAS OFF (STANDBY)');
-    } catch (e) {
-        console.error('Reset error:', e);
-    }
-}
-
-// ─── Plate Correction ──────────────────────────────────────
-
-async function savePlate() {
-    const plate = document.getElementById('plateInput').value.trim();
-    if (!plate) return;
-
-    try {
-        const res = await fetch('/api/capture/set-plate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ plate })
-        });
-        const data = await res.json();
-        if (data.success) {
-            document.getElementById('successPlate').textContent = data.plate;
-        }
-    } catch (e) {
-        console.error('Set plate error:', e);
-    }
-}
-
-// ─── Status Polling ────────────────────────────────────────
-
-function startStatusPolling() {
-    if (statusInterval) clearInterval(statusInterval);
-    statusInterval = setInterval(pollStatus, 500);
-}
-
-function stopStatusPolling() {
-    if (statusInterval) {
-        clearInterval(statusInterval);
-        statusInterval = null;
-    }
-}
-
-async function pollStatus() {
-    try {
-        const res = await fetch('/api/capture/status');
-        const data = await res.json();
-
-        // Update state indicator
-        const cs = data.capture_state || {};
-        updateStateIndicator(cs.state, cs.message);
-
-        // Update camera conditions
-        const conds = data.conditions || {};
-        for (const cam of CAMERAS) {
-            const c = conds[cam] || {};
-
-            // Detection dot
-            const dot = document.getElementById('dot' + capitalize(cam));
-            const statusText = document.getElementById('statusText' + capitalize(cam));
-            if (c.detected) {
-                dot.classList.add('active');
-                statusText.textContent = 'TRACKING';
-                statusText.style.color = 'var(--success)';
-            } else {
-                dot.classList.remove('active');
-                statusText.textContent = 'SEARCHING';
-                statusText.style.color = 'var(--text-muted)';
-            }
-
-            // Confidence
-            const conf = document.getElementById('conf' + capitalize(cam));
-            conf.textContent = c.detected ? `${(c.confidence * 100).toFixed(1)}%` : '—';
-
-            // Motion
-            const motion = document.getElementById('motion' + capitalize(cam));
-            motion.textContent = c.motion_state || '—';
-
-            // Conditions checklist
-            updateCondition(`cond${capitalize(cam)}Detected`, c.detected);
-            updateCondition(`cond${capitalize(cam)}View`, c.view_ok);
-
-            // Mini status indicator on Camera Selector Bar
-            const barDot = document.getElementById('camInd' + capitalize(cam));
-            if (barDot) {
-                if (c.detected) barDot.classList.add('active');
-                else barDot.classList.remove('active');
-            }
-        }
-
-        // Stationary condition (all cameras)
-        const allStationary = CAMERAS.every(cam => (conds[cam] || {}).stationary);
-        updateCondition('condStationary', allStationary);
-
-        // Delay condition / countdown
-        const delayLabel = document.getElementById('delayCountdownLabel');
-        if (data.ready_countdown !== null && data.ready_countdown !== undefined) {
-            updateCondition('condDelayReady', true);
-            if (delayLabel) {
-                delayLabel.textContent = `Capturing in ${data.ready_countdown.toFixed(1)}s...`;
-            }
-        } else if (data.captured) {
-            updateCondition('condDelayReady', true);
-            if (delayLabel) delayLabel.textContent = 'Capture complete';
-        } else {
-            updateCondition('condDelayReady', false);
-            if (delayLabel) delayLabel.textContent = 'Capture delay verified';
-        }
-
-        // Pending capture awaiting confirmation
-        if (data.pending_capture && typeof showConfirmModal === 'function') {
-            showConfirmModal(data.pending_capture);
-        }
-
-        // Capture success (after user confirmed and saved)
-        if (data.captured && data.capture_result) {
-            showCaptureSuccess(data.capture_result, data.plate_text);
-        }
-
-    } catch (e) {
-        // Silent — will retry next interval
-    }
-}
-
-// ─── UI Updates ────────────────────────────────────────────
-
-function updateStateIndicator(state, message) {
-    const dot = document.getElementById('stateDot');
-    const text = document.getElementById('stateText');
-    text.textContent = message || state;
-
-    // Remove all state classes
-    dot.className = 'state-dot';
-
-    switch (state) {
-        case 'MONITORING':
-            dot.classList.add('monitoring'); break;
-        case 'VEHICLE_DETECTED':
-        case 'VEHICLE_MOVING':
-        case 'VEHICLE_STOPPING':
-        case 'CHECKING_VIEWS':
-            dot.classList.add('detected'); break;
-        case 'CAPTURE_READY':
-        case 'CAPTURING':
-        case 'AWAITING_CONFIRMATION':
-        case 'CONFIRM_PENDING':
-            dot.classList.add('capturing'); break;
-        case 'CAPTURED':
-        case 'SAVED':
-            dot.classList.add('saved'); break;
-        case 'ERROR':
-            dot.classList.add('error'); break;
-    }
-}
-
-function updateCondition(id, passed) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (passed) {
-        el.classList.add('passed');
-    } else {
-        el.classList.remove('passed');
-    }
-}
-
-function resetConditions() {
-    document.querySelectorAll('.condition-item').forEach(el => {
-        el.classList.remove('passed');
-    });
-}
-
-function showCaptureSuccess(result, plateText) {
-    const el = document.getElementById('captureSuccess');
-    el.style.display = 'block';
-
-    const plate = plateText || result.vehicle_number || '';
-    const isUnknown = (!plate || plate === 'UNKNOWN');
-    const plateDisplay = isUnknown ? 'REGISTRATION NOT CONFIRMED' : plate;
-    const plateVal = isUnknown ? '' : plate;
-
-    const plateEl = document.getElementById('successPlate');
-    plateEl.textContent = plateDisplay;
-    if (isUnknown) {
-        plateEl.style.color = 'var(--warning)';
-        plateEl.style.fontSize = '20px';
-    } else {
-        plateEl.style.color = 'var(--text-primary)';
-        plateEl.style.fontSize = '28px';
-    }
-
-    document.getElementById('successMeta').textContent =
-        `${result.capture_date} — ${result.capture_time_12h}`;
-    const inputEl = document.getElementById('plateInput');
-    inputEl.value = plateVal;
-    if (isUnknown) {
-        inputEl.placeholder = 'ENTER REGISTRATION (e.g. KL 01 AL 0009)';
-    }
-
-    // Preview images
-    const preview = document.getElementById('capturePreview');
-    preview.innerHTML = CAMERAS.map(cam =>
-        `<img src="/api/vehicle/thumbnail/${result.session_id}/${cam}"
-              onerror="this.style.background='var(--bg-surface-3)'" alt="${cam}">`
-    ).join('');
-
-    // Links
-    document.getElementById('linkViewSession').href = `/vehicle/${result.session_id}`;
-}
-
-function capitalize(s) {
-    return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-// ─── Camera Selector & View Switching ─────────────────────
+// ─── Screen View Switching (All 4 Screens / Front / Back / Left / Right) ─
 
 function selectCameraView(cam) {
     currentCameraView = cam;
@@ -633,21 +420,26 @@ function selectCameraView(cam) {
     };
 
     if (cam === 'all') {
+        // Show all 4 visual boxes in grid
         if (grid) grid.classList.remove('single-view');
         for (const panel of Object.values(panels)) {
             if (panel) {
+                panel.style.display = 'block';
                 panel.classList.remove('hidden-panel');
                 panel.classList.remove('single-focused');
             }
         }
     } else {
+        // Show only the selected visual box; make the other 3 visual boxes completely invisible
         if (grid) grid.classList.add('single-view');
         for (const [key, panel] of Object.entries(panels)) {
             if (panel) {
                 if (key === cam) {
+                    panel.style.display = 'block';
                     panel.classList.remove('hidden-panel');
                     panel.classList.add('single-focused');
                 } else {
+                    panel.style.display = 'none';
                     panel.classList.add('hidden-panel');
                     panel.classList.remove('single-focused');
                 }
@@ -656,23 +448,247 @@ function selectCameraView(cam) {
     }
 }
 
-// ─── Camera Source Mode Switcher ──────────────────────────
+// ─── Status Polling & Validity State Updates ───────────────
 
-async function switchCameraSourceMode(mode) {
+function startStatusPolling() {
+    if (statusInterval) clearInterval(statusInterval);
+    statusInterval = setInterval(pollStatus, 500);
+}
+
+function stopStatusPolling() {
+    if (statusInterval) {
+        clearInterval(statusInterval);
+        statusInterval = null;
+    }
+}
+
+async function pollStatus() {
+    if (!isCameraPowerOn) return;
+
     try {
-        const res = await fetch('/api/capture/set-source', {
+        const res = await fetch('/api/capture/status');
+        const data = await res.json();
+
+        // Update state indicator
+        const cs = data.capture_state || {};
+        updateStateIndicator(cs.state, cs.message);
+
+        // Sync AutoCapture setting from backend if returned
+        if (data.auto_capture !== undefined) {
+            isAutoCaptureActive = Boolean(data.auto_capture);
+            const btn = document.getElementById('btnAutoCaptureToggle');
+            const icon = document.getElementById('autoCaptureIcon');
+            const text = document.getElementById('autoCaptureText');
+            if (btn && icon && text) {
+                if (isAutoCaptureActive) {
+                    btn.className = 'btn-autocapture-toggle active';
+                    icon.className = 'fas fa-bolt';
+                    text.textContent = 'AUTOCAPTURE: ACTIVE';
+                } else {
+                    btn.className = 'btn-autocapture-toggle disabled-mode';
+                    icon.className = 'fas fa-pause-circle';
+                    text.textContent = 'AUTOCAPTURE: PAUSED';
+                }
+            }
+        }
+
+        // Update camera detections and confidence badges
+        const conds = data.conditions || {};
+        for (const cam of CAMERAS) {
+            const c = conds[cam] || {};
+
+            // Detection dot & status
+            const dot = document.getElementById('dot' + capitalize(cam));
+            const statusText = document.getElementById('statusText' + capitalize(cam));
+            if (dot && statusText) {
+                if (c.detected) {
+                    dot.classList.add('active');
+                    statusText.textContent = 'TRACKING';
+                    statusText.style.color = 'var(--success)';
+                } else {
+                    dot.classList.remove('active');
+                    statusText.textContent = 'SEARCHING';
+                    statusText.style.color = 'var(--text-muted)';
+                }
+            }
+
+            // Confidence
+            const conf = document.getElementById('conf' + capitalize(cam));
+            if (conf) {
+                conf.textContent = c.detected ? `${(c.confidence * 100).toFixed(1)}%` : '—';
+            }
+
+            // Motion
+            const motion = document.getElementById('motion' + capitalize(cam));
+            if (motion) {
+                motion.textContent = c.motion_state || '—';
+            }
+
+            // Mini status dot on the Screen View selector pills
+            const barDot = document.getElementById('camInd' + capitalize(cam));
+            if (barDot) {
+                if (c.detected) barDot.classList.add('active');
+                else barDot.classList.remove('active');
+            }
+        }
+
+        // Pending capture awaiting user confirmation & database push
+        if (data.pending_capture && typeof showConfirmModal === 'function') {
+            showConfirmModal(data.pending_capture);
+        }
+
+        // Capture success (after user confirmed and committed to database)
+        if (data.captured && data.capture_result) {
+            showCaptureSuccess(data.capture_result, data.plate_text);
+        }
+
+    } catch (e) {
+        // Silent — retry next cycle
+    }
+}
+
+function updateStateIndicator(state, message) {
+    const dot = document.getElementById('stateDot');
+    const text = document.getElementById('stateText');
+    if (text) text.textContent = message || state;
+    if (!dot) return;
+
+    dot.className = 'state-dot';
+    switch (state) {
+        case 'MONITORING':
+            dot.classList.add('monitoring'); break;
+        case 'VEHICLE_DETECTED':
+        case 'VEHICLE_MOVING':
+        case 'VEHICLE_STOPPING':
+        case 'CHECKING_VIEWS':
+            dot.classList.add('detected'); break;
+        case 'CAPTURE_READY':
+        case 'CAPTURING':
+        case 'AWAITING_CONFIRMATION':
+        case 'CONFIRM_PENDING':
+            dot.classList.add('capturing'); break;
+        case 'CAPTURED':
+        case 'SAVED':
+            dot.classList.add('saved'); break;
+        case 'ERROR':
+            dot.classList.add('error'); break;
+    }
+}
+
+function showCaptureSuccess(result, plateText) {
+    const el = document.getElementById('captureSuccess');
+    if (!el) return;
+    el.style.display = 'block';
+
+    const plate = plateText || result.vehicle_number || '';
+    const isUnknown = (!plate || plate === 'UNKNOWN');
+    const plateDisplay = isUnknown ? 'REGISTRATION NOT CONFIRMED' : plate;
+    const plateVal = isUnknown ? '' : plate;
+
+    const plateEl = document.getElementById('successPlate');
+    if (plateEl) {
+        plateEl.textContent = plateDisplay;
+        if (isUnknown) {
+            plateEl.style.color = 'var(--warning)';
+            plateEl.style.fontSize = '20px';
+        } else {
+            plateEl.style.color = 'var(--text-primary)';
+            plateEl.style.fontSize = '28px';
+        }
+    }
+
+    const metaEl = document.getElementById('successMeta');
+    if (metaEl) {
+        metaEl.textContent = `${result.capture_date} — ${result.capture_time_12h}`;
+    }
+
+    const inputEl = document.getElementById('plateInput');
+    if (inputEl) {
+        inputEl.value = plateVal;
+        if (isUnknown) {
+            inputEl.placeholder = 'ENTER REGISTRATION (e.g. KL 01 AL 0009)';
+        }
+    }
+
+    // Preview images
+    const preview = document.getElementById('capturePreview');
+    if (preview) {
+        preview.innerHTML = CAMERAS.map(cam =>
+            `<img src="/api/vehicle/thumbnail/${result.session_id}/${cam}"
+                  onerror="this.style.background='var(--bg-surface-3)'" alt="${cam}">`
+        ).join('');
+    }
+
+    const sessionLink = document.getElementById('linkViewSession');
+    if (sessionLink) {
+        sessionLink.href = `/vehicle/${result.session_id}`;
+    }
+}
+
+async function savePlate() {
+    const input = document.getElementById('plateInput');
+    const plate = input ? input.value.trim() : '';
+    if (!plate) return;
+
+    try {
+        const res = await fetch('/api/capture/set-plate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode })
+            body: JSON.stringify({ plate })
         });
         const data = await res.json();
         if (data.success) {
-            console.log('Switched camera source to:', mode, data.sources);
-        } else {
-            alert('Source switch failed: ' + (data.error || 'Unknown error'));
+            const plateEl = document.getElementById('successPlate');
+            if (plateEl) plateEl.textContent = data.plate;
         }
     } catch (e) {
-        console.error('Source switch error:', e);
-        alert('Failed to change camera source');
+        console.error('Set plate error:', e);
     }
 }
+
+function capitalize(s) {
+    if (!s) return '';
+    return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ─── Initializer on Page Load ──────────────────────────────
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // 1. Set default view to 'all' (all 4 screens visible in 2x2 grid)
+    selectCameraView('all');
+
+    // 2. Discover available cameras and assign screen pickers
+    await loadAvailableCameras(false);
+    startCameraAutoDiscovery();
+
+    // 3. Load saved capture delay
+    try {
+        const res = await fetch('/api/settings');
+        const cfg = await res.json();
+        if (cfg.capture_delay_seconds !== undefined) {
+            const sel = document.getElementById('selectCaptureDelay');
+            if (sel) sel.value = parseFloat(cfg.capture_delay_seconds).toFixed(1);
+        }
+    } catch (e) {}
+
+    // 4. Ensure cameras are live and start status polling
+    try {
+        const sRes = await fetch('/api/capture/status');
+        const sData = await sRes.json();
+        if (sData.is_running) {
+            setLiveUIState(true);
+            startStatusPolling();
+        } else {
+            // Auto-start live view
+            await fetch('/api/capture/start', { method: 'POST' });
+            setLiveUIState(true);
+            startStatusPolling();
+        }
+    } catch (e) {
+        try {
+            await fetch('/api/capture/start', { method: 'POST' });
+            setLiveUIState(true);
+            startStatusPolling();
+        } catch (err) {}
+    }
+});

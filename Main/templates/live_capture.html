@@ -18,22 +18,22 @@
     <div class="cam-bar-left">
         <span class="cam-bar-label"><i class="fas fa-desktop"></i> SCREEN VIEW:</span>
         <div class="cam-bar-pills">
-            <button class="cam-select-btn active" id="btnCamAll" onclick="selectCameraView('all')" title="View all 4 screens simultaneously (360° Quad)">
-                <i class="fas fa-th-large"></i> ALL 4 SCREENS (360°)
+            <button class="cam-select-btn active" id="btnCamAll" onclick="selectCameraView('all')" title="View all 4 screens simultaneously (Quad 2x2 Grid)">
+                <i class="fas fa-th-large"></i> ALL 4 SCREENS
             </button>
-            <button class="cam-select-btn" id="btnCamFront" onclick="selectCameraView('front')" title="Focus on Front View Screen">
+            <button class="cam-select-btn" id="btnCamFront" onclick="selectCameraView('front')" title="Show Front View only (Hide other 3 screens)">
                 <span class="cam-num">F</span> FRONT VIEW
                 <span class="cam-status-indicator" id="camIndFront"></span>
             </button>
-            <button class="cam-select-btn" id="btnCamBack" onclick="selectCameraView('back')" title="Focus on Rear View Screen">
-                <span class="cam-num">R</span> REAR VIEW
+            <button class="cam-select-btn" id="btnCamBack" onclick="selectCameraView('back')" title="Show Back View only (Hide other 3 screens)">
+                <span class="cam-num">B</span> BACK VIEW
                 <span class="cam-status-indicator" id="camIndBack"></span>
             </button>
-            <button class="cam-select-btn" id="btnCamLeft" onclick="selectCameraView('left')" title="Focus on Left View Screen">
+            <button class="cam-select-btn" id="btnCamLeft" onclick="selectCameraView('left')" title="Show Left View only (Hide other 3 screens)">
                 <span class="cam-num">L</span> LEFT VIEW
                 <span class="cam-status-indicator" id="camIndLeft"></span>
             </button>
-            <button class="cam-select-btn" id="btnCamRight" onclick="selectCameraView('right')" title="Focus on Right View Screen">
+            <button class="cam-select-btn" id="btnCamRight" onclick="selectCameraView('right')" title="Show Right View only (Hide other 3 screens)">
                 <span class="cam-num">R</span> RIGHT VIEW
                 <span class="cam-status-indicator" id="camIndRight"></span>
             </button>
@@ -72,7 +72,7 @@
                 <span id="statusTextFront">ONLINE</span>
             </div>
         </div>
-        <div class="camera-feed" onclick="selectCameraView('front')" style="cursor:pointer;" title="Click to expand Front View">
+        <div class="camera-feed">
             <img id="feedFront" src="/api/capture/stream/front" alt="Front Camera Feed" onerror="setTimeout(()=>{if(this.src)this.src='/api/capture/stream/front?t='+Date.now();},1500)">
         </div>
         <div class="camera-info">
@@ -98,7 +98,7 @@
                 <span id="statusTextBack">ONLINE</span>
             </div>
         </div>
-        <div class="camera-feed" onclick="selectCameraView('back')" style="cursor:pointer;" title="Click to expand Rear View">
+        <div class="camera-feed">
             <img id="feedBack" src="/api/capture/stream/back" alt="Rear Camera Feed" onerror="setTimeout(()=>{if(this.src)this.src='/api/capture/stream/back?t='+Date.now();},1500)">
         </div>
         <div class="camera-info">
@@ -124,7 +124,7 @@
                 <span id="statusTextLeft">ONLINE</span>
             </div>
         </div>
-        <div class="camera-feed" onclick="selectCameraView('left')" style="cursor:pointer;" title="Click to expand Left View">
+        <div class="camera-feed">
             <img id="feedLeft" src="/api/capture/stream/left" alt="Left Camera Feed" onerror="setTimeout(()=>{if(this.src)this.src='/api/capture/stream/left?t='+Date.now();},1500)">
         </div>
         <div class="camera-info">
@@ -150,7 +150,7 @@
                 <span id="statusTextRight">ONLINE</span>
             </div>
         </div>
-        <div class="camera-feed" onclick="selectCameraView('right')" style="cursor:pointer;" title="Click to expand Right View">
+        <div class="camera-feed">
             <img id="feedRight" src="/api/capture/stream/right" alt="Right Camera Feed" onerror="setTimeout(()=>{if(this.src)this.src='/api/capture/stream/right?t='+Date.now();},1500)">
         </div>
         <div class="camera-info">
@@ -160,81 +160,39 @@
     </div>
 </div>
 
-<!-- Controls -->
+<!-- Controls: Camera Power Toggle, AutoCapture Mode & Settings -->
 <div class="capture-controls">
-    <button class="btn btn-success btn-lg" id="btnStart" onclick="startCapture()">
-        <i class="fas fa-power-off"></i> START LIVE VIEW &amp; CAPTURE
-    </button>
-    <button class="btn" id="btnPause" onclick="pauseCapture()" disabled>
-        <i class="fas fa-pause"></i> PAUSE
-    </button>
-    <button class="btn" id="btnResume" onclick="resumeCapture()" disabled>
-        <i class="fas fa-play"></i> RESUME
-    </button>
-    <button class="btn btn-danger" id="btnStop" onclick="stopCapture()" disabled>
-        <i class="fas fa-stop"></i> STOP (CAMERAS OFF)
-    </button>
-    <button class="btn btn-warning" id="btnReset" onclick="resetCapture()">
-        <i class="fas fa-undo"></i> RESET
+    <!-- Single Camera Power Toggle Button (Turns on/off all 4 cameras at once) -->
+    <button type="button" class="btn-camera-toggle power-on" id="btnCameraToggle" onclick="toggleCameraPower()" title="Single Toggle: Turn ON or OFF all 4 cameras (when OFF, screens turn pitch black)">
+        <i class="fas fa-video" id="cameraToggleIcon"></i>
+        <span id="cameraToggleText">CAMERAS: ON (ALL 4 ACTIVE)</span>
     </button>
 
-    <div class="delay-control-box" style="display:inline-flex; align-items:center; gap:8px; margin-left:14px; padding:6px 12px; background:rgba(0,192,240,0.06); border:1px solid rgba(0,192,240,0.25); border-radius:4px;" title="Select how many seconds to wait after the car is fully visible before capturing photos">
-        <label for="selectCaptureDelay" style="font-size:0.75rem; letter-spacing:0.06em; text-transform:uppercase; color:#00c0f0; margin:0; display:flex; align-items:center; gap:5px; font-weight:600;">
-            <i class="fas fa-stopwatch"></i> Delay After Full Car Detect:
+    <!-- AutoCapture Toggle Button -->
+    <button type="button" class="btn-autocapture-toggle active" id="btnAutoCaptureToggle" onclick="toggleAutoCapture()" title="AutoCapture: Tests 4-camera vehicle validity then prompts to confirm saving to database">
+        <i class="fas fa-bolt" id="autoCaptureIcon"></i>
+        <span id="autoCaptureText">AUTOCAPTURE: ACTIVE</span>
+    </button>
+
+    <!-- Manual Test Validity & Capture Now Button -->
+    <button type="button" class="btn btn-primary" id="btnTriggerCapture" onclick="triggerValidityCapture()" title="Test vehicle validity and capture 4 camera photos immediately">
+        <i class="fas fa-camera"></i> CAPTURE NOW
+    </button>
+
+    <!-- Delay Selector -->
+    <div class="delay-control-box" title="Select delay seconds after vehicle full view is verified before capturing">
+        <label for="selectCaptureDelay">
+            <i class="fas fa-stopwatch"></i> DELAY AFTER DETECT:
         </label>
-        <select id="selectCaptureDelay" onchange="changeCaptureDelay(this.value)" style="background:#111; color:#fff; border:1px solid #444; padding:5px 8px; border-radius:3px; font-size:0.8rem; font-weight:600; cursor:pointer;">
+        <select id="selectCaptureDelay" onchange="changeCaptureDelay(this.value)">
             <option value="0.0">0.0s (Immediate)</option>
             <option value="0.5">0.5s</option>
-            <option value="1.0" selected>1.0s (Next Second - Recommended)</option>
+            <option value="1.0" selected>1.0s (Recommended)</option>
             <option value="1.5">1.5s</option>
             <option value="2.0">2.0s</option>
             <option value="3.0">3.0s</option>
             <option value="5.0">5.0s</option>
         </select>
-    </div>
-</div>
-
-<!-- Conditions Checklist -->
-<div class="conditions-grid" id="conditionsGrid">
-    <div class="condition-item" id="condFrontDetected">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        Camera 0 [Front] detected
-    </div>
-    <div class="condition-item" id="condBackDetected">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        Camera 1 [Back] detected
-    </div>
-    <div class="condition-item" id="condLeftDetected">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        Camera 2 [Left] detected
-    </div>
-    <div class="condition-item" id="condRightDetected">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        Camera 3 [Right] detected
-    </div>
-    <div class="condition-item" id="condFrontView">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        Camera 0 [Front] full view
-    </div>
-    <div class="condition-item" id="condBackView">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        Camera 1 [Back] full view
-    </div>
-    <div class="condition-item" id="condLeftView">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        Camera 2 [Left] full view
-    </div>
-    <div class="condition-item" id="condRightView">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        Camera 3 [Right] full view
-    </div>
-    <div class="condition-item" id="condStationary">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        Vehicle stationary
-    </div>
-    <div class="condition-item" id="condDelayReady">
-        <div class="check-icon"><i class="fas fa-check"></i></div>
-        <span id="delayCountdownLabel">Capture delay verified</span>
     </div>
 </div>
 
@@ -296,5 +254,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/capture.js?v=3.3"></script>
+<script src="/static/js/capture.js?v=4.0"></script>
 {% endblock %}

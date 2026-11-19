@@ -268,6 +268,17 @@ def api_capture_trigger():
         "pending": controller._pending_capture
     })
 
+@app.route("/api/capture/set-autocapture", methods=["POST"])
+def api_capture_set_autocapture():
+    """Toggle AutoCapture on or off."""
+    data = request.get_json(silent=True) or {}
+    enabled = data.get("enabled", True)
+    controller.set_auto_capture(enabled)
+    return jsonify({
+        "success": True,
+        "auto_capture": controller.auto_capture_enabled
+    })
+
 @app.route("/api/capture/set-plate", methods=["POST"])
 def api_set_plate():
     data = request.get_json() or {}
@@ -418,30 +429,16 @@ def generate_mjpeg(camera_name: str):
             time.sleep(0.5)
 
 
-def create_blank_frame(camera_name: str):
-    """Create a high-contrast placeholder frame indicating camera standby."""
+def create_blank_frame(camera_name: str = ""):
+    """Create a pure black placeholder frame when cameras are turned off."""
     import numpy as np
-    frame = np.zeros((360, 640, 3), dtype=np.uint8)
-    frame[:] = (18, 18, 18)
-    for y in range(0, 360, 45):
-        cv2.line(frame, (0, y), (640, y), (28, 28, 28), 1)
-    for x in range(0, 640, 64):
-        cv2.line(frame, (x, 0), (x, 360), (28, 28, 28), 1)
-    label = CAMERA_LABELS.get(camera_name, camera_name.upper())
-    cv2.putText(frame, label, (24, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (160, 160, 160), 2)
-    cv2.putText(frame, "CAMERAS OFF (STANDBY)", (150, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (180, 180, 180), 2)
-    cv2.putText(frame, "Click START LIVE VIEW to Activate", (170, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (110, 110, 110), 1)
-    cv2.circle(frame, (640 - 24, 24), 8, (80, 80, 80), -1)
-    return frame
+    return np.zeros((360, 640, 3), dtype=np.uint8)
 
 
 @app.route("/api/capture/stream/<camera>")
 def api_camera_stream(camera):
     if camera not in VIDEO_SOURCES:
         return "Invalid camera", 404
-    # Auto-start controller if not running so visual boxes stream live cameras immediately
-    if not controller.is_running:
-        controller.start()
 
     return Response(
         generate_mjpeg(camera),

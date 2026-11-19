@@ -84,6 +84,14 @@ class CaptureController:
 
         # YOLO init
         self._yolo_ready = False
+        self.auto_capture_enabled = True
+
+    def set_auto_capture(self, enabled: bool) -> bool:
+        """Enable or disable automatic capture upon validity check."""
+        with self._lock:
+            self.auto_capture_enabled = bool(enabled)
+            logger.info("AutoCapture enabled set to: %s", self.auto_capture_enabled)
+            return self.auto_capture_enabled
 
     def initialize_yolo(self) -> bool:
         """Load YOLO model."""
@@ -243,11 +251,14 @@ class CaptureController:
         return {"success": True}
 
     def stop(self) -> dict:
-        if not self.is_running:
-            return {"success": False, "error": "No active session"}
         self._stop_event.set()
         self.is_running = False
         self.is_paused = False
+        if self._thread and self._thread.is_alive():
+            try:
+                self._thread.join(timeout=1.0)
+            except Exception:
+                pass
         self.capture_state.set("STOPPED")
         self.video_manager.release_all()
         self._display_frames = {name: None for name in CAMERA_NAMES}
@@ -365,6 +376,7 @@ class CaptureController:
             "capture_result": self._capture_result,
             "pending_capture": self._pending_capture,
             "yolo_ready": self._yolo_ready,
+            "auto_capture": self.auto_capture_enabled,
             "capture_delay_seconds": delay_needed,
             "ready_countdown": ready_countdown,
         }
@@ -497,7 +509,7 @@ class CaptureController:
                 self._display_frames[name] = cam.get_display_frame()
 
             # Update capture state
-            if not self._captured and self._pending_capture is None:
+            if self.auto_capture_enabled and not self._captured and self._pending_capture is None:
                 if not any_detected:
                     self._ready_start_time = None
                     self.capture_state.set("MONITORING", "Waiting for vehicle...")
@@ -535,6 +547,9 @@ class CaptureController:
                     else:
                         remaining = max(0.1, delay_needed - elapsed_ready)
                         self.capture_state.set("CAPTURE_READY", f"Full view verified — capturing in {remaining:.1f}s...")
+            elif not self.auto_capture_enabled and self._pending_capture is None and not self._captured:
+                self._ready_start_time = None
+                self.capture_state.set("MONITORING", "AutoCapture paused (Manual trigger available)")
 
             # Frame rate control
             elapsed = time.time() - loop_start

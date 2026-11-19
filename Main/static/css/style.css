@@ -569,6 +569,16 @@ body {
     grid-template-columns: 1fr;
 }
 
+.camera-grid.single-view .camera-panel.single-focused {
+    border-color: rgba(0, 192, 240, 0.6);
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.7);
+}
+
+.camera-grid.single-view .camera-panel.single-focused .camera-feed {
+    min-height: 520px;
+    max-height: 75vh;
+}
+
 .camera-panel.hidden-panel {
     display: none !important;
 }
@@ -576,6 +586,26 @@ body {
 .camera-panel.single-focused {
     border-color: rgba(0, 192, 240, 0.4);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Pitch Black Screen when Cameras are Powered Off */
+.camera-grid.cameras-off .camera-feed {
+    background: #000000 !important;
+    position: relative;
+}
+
+.camera-grid.cameras-off .camera-feed img {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+.camera-grid.cameras-off .camera-feed::after {
+    content: "CAMERAS OFF (STANDBY)";
+    position: absolute;
+    color: #4a5460;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 2px;
 }
 
 .camera-panel {
@@ -655,13 +685,131 @@ body {
 /* ─── Capture Controls ──────────────────────────────────── */
 .capture-controls {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
-    padding: 20px;
+    gap: 14px;
+    padding: 16px 20px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     margin-bottom: 24px;
+}
+
+.btn-camera-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 22px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid transparent;
+}
+
+.btn-camera-toggle.power-on {
+    background: rgba(0, 200, 81, 0.14);
+    color: #00e676;
+    border-color: rgba(0, 230, 118, 0.45);
+    box-shadow: 0 0 16px rgba(0, 230, 118, 0.22);
+}
+
+.btn-camera-toggle.power-on:hover {
+    background: rgba(0, 200, 81, 0.25);
+    border-color: #00e676;
+    box-shadow: 0 0 22px rgba(0, 230, 118, 0.35);
+}
+
+.btn-camera-toggle.power-off {
+    background: rgba(255, 68, 68, 0.14);
+    color: #ff5252;
+    border-color: rgba(255, 82, 82, 0.45);
+    box-shadow: 0 0 16px rgba(255, 82, 82, 0.22);
+}
+
+.btn-camera-toggle.power-off:hover {
+    background: rgba(255, 68, 68, 0.25);
+    border-color: #ff5252;
+    box-shadow: 0 0 22px rgba(255, 82, 82, 0.35);
+}
+
+.btn-autocapture-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 22px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid transparent;
+}
+
+.btn-autocapture-toggle.active {
+    background: rgba(0, 192, 240, 0.14);
+    color: #00c0f0;
+    border-color: rgba(0, 192, 240, 0.5);
+    box-shadow: 0 0 16px rgba(0, 192, 240, 0.22);
+}
+
+.btn-autocapture-toggle.active:hover {
+    background: rgba(0, 192, 240, 0.25);
+    border-color: #00c0f0;
+    box-shadow: 0 0 22px rgba(0, 192, 240, 0.38);
+}
+
+.btn-autocapture-toggle.disabled-mode {
+    background: rgba(255, 255, 255, 0.05);
+    color: #88929b;
+    border-color: #3b434d;
+}
+
+.btn-autocapture-toggle.disabled-mode:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #c0ccd8;
+}
+
+.delay-control-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    padding: 7px 14px;
+    background: rgba(0, 192, 240, 0.06);
+    border: 1px solid rgba(0, 192, 240, 0.25);
+    border-radius: var(--radius-sm);
+}
+
+.delay-control-box label {
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #00c0f0;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.delay-control-box select {
+    background: #111417;
+    color: #fff;
+    border: 1px solid #3b434d;
+    padding: 5px 10px;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+}
+
+.delay-control-box select:focus {
+    border-color: #00c0f0;
 }
 
 /* ─── State Indicator ───────────────────────────────────── */
