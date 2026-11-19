@@ -15,28 +15,38 @@ logger = logging.getLogger(__name__)
 _cached_cameras: List[Dict[str, Any]] = []
 _cache_timestamp: float = 0.0
 _cache_lock = threading.Lock()
-CACHE_TTL = 10.0  # seconds
+CACHE_TTL = 60.0  # seconds
 
-def probe_hardware_cameras(max_devices: int = 6) -> List[Dict[str, Any]]:
+def probe_hardware_cameras(max_devices: int = 4, currently_open_indices: set = None) -> List[Dict[str, Any]]:
     """
-    Probe video device indices (0 to max_devices-1) via DirectShow on Windows.
-    Returns list of camera info dictionaries.
+    Probe video device indices via DirectShow on Windows.
+    Quickly discovers connected webcams without blocking or conflicting with active streams.
     """
     discovered = []
     backend = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
+    if currently_open_indices is None:
+        currently_open_indices = set()
 
     for idx in range(max_devices):
-        cap = cv2.VideoCapture(idx, backend)
         is_connected = False
         width, height = 0, 0
-        if cap is not None and cap.isOpened():
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                is_connected = True
-                height, width = frame.shape[:2]
-            cap.release()
 
-        # Generate user-friendly label
+        # If already open and active in VideoManager, don't re-open (prevents DirectShow conflict)
+        if idx in currently_open_indices:
+            is_connected = True
+            width, height = 640, 480
+        else:
+            try:
+                cap = cv2.VideoCapture(idx, backend)
+                if cap is not None and cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        is_connected = True
+                        height, width = frame.shape[:2]
+                    cap.release()
+            except Exception:
+                is_connected = False
+
         if idx == 0:
             friendly = "Camera 0 (Laptop Main / Integrated)"
         elif idx == 1:
@@ -56,7 +66,7 @@ def probe_hardware_cameras(max_devices: int = 6) -> List[Dict[str, Any]]:
     return discovered
 
 
-def get_available_cameras(video_sources: dict = None, force_refresh: bool = False) -> Dict[str, Any]:
+def get_available_cameras(video_sources: dict = None, force_refresh: bool = False, currently_open_indices: set = None) -> Dict[str, Any]:
     """
     Get available hardware cameras and fallback prerecorded video sources.
     Uses cached probe results when within CACHE_TTL.
@@ -67,7 +77,7 @@ def get_available_cameras(video_sources: dict = None, force_refresh: bool = Fals
         now = time.time()
         if force_refresh or (now - _cache_timestamp > CACHE_TTL) or not _cached_cameras:
             try:
-                _cached_cameras = probe_hardware_cameras(max_devices=6)
+                _cached_cameras = probe_hardware_cameras(max_devices=4, currently_open_indices=currently_open_indices)
                 _cache_timestamp = now
                 logger.info("Probed hardware cameras: %d connected of %d checked",
                             sum(1 for c in _cached_cameras if c["connected"]),

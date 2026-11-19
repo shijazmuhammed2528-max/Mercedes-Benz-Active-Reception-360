@@ -178,7 +178,9 @@ class CaptureController:
     def start(self) -> dict:
         """Start a new capture session."""
         if self.is_running:
-            return {"success": False, "error": "Session already running"}
+            self._captured = False
+            self.capture_state.set("MONITORING")
+            return {"success": True, "session_id": self.session_id, "already_running": True}
 
         # Initialize YOLO if needed
         if not self._yolo_ready:
@@ -351,7 +353,13 @@ class CaptureController:
         }
 
     def get_display_frame(self, camera: str) -> np.ndarray | None:
-        return self._display_frames.get(camera)
+        frame = self._display_frames.get(camera)
+        if frame is not None:
+            return frame
+        cam = self.video_manager.get_camera(camera)
+        if cam and cam.current_frame is not None:
+            return cam.get_display_frame() or cam.current_frame
+        return None
 
     # ─── Processing Loop ──────────────────────────────────────
 
@@ -383,16 +391,15 @@ class CaptureController:
                 cam = self.video_manager.get_camera(name)
                 if cam and cam.is_open:
                     if not cam.read_frame():
-                        # Video ended — loop it
-                        cam.reset()
-                        cam.open()
                         all_read = False
+                    else:
+                        disp = cam.get_display_frame()
+                        if disp is not None:
+                            self._display_frames[name] = disp
+                else:
+                    all_read = False
 
-            if not all_read:
-                time.sleep(0.05)
-                continue
-
-            # Run YOLO on each camera
+            # Run YOLO and update visual display frames for every camera
             any_detected = False
             all_detected = True
             all_view_ok = True
@@ -400,7 +407,7 @@ class CaptureController:
 
             for name in CAMERA_NAMES:
                 cam = self.video_manager.get_camera(name)
-                if cam is None or cam.current_frame is None:
+                if cam is None or cam.current_frame is None or not cam.is_open:
                     all_detected = False
                     continue
 

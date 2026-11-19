@@ -212,7 +212,11 @@ def api_cameras_available():
     """Discover connected USB and integrated webcams."""
     from backend.services.camera_discovery import get_available_cameras
     refresh = request.args.get("refresh", "false").lower() == "true"
-    avail = get_available_cameras(VIDEO_SOURCES, force_refresh=refresh)
+    open_indices = set()
+    for cam in controller.video_manager.cameras.values():
+        if cam.is_open and cam._is_device_source():
+            open_indices.add(cam._get_device_index())
+    avail = get_available_cameras(VIDEO_SOURCES, force_refresh=refresh, currently_open_indices=open_indices)
     avail["current_mapping"] = controller.get_camera_mapping()
     avail["is_live"] = controller.is_running
     return jsonify(avail)
@@ -241,27 +245,31 @@ def api_cameras_mapping():
 # ═══════════════════════════════════════════════════════════════
 
 def generate_mjpeg(camera_name: str):
-    """Generate MJPEG stream for a camera."""
-    while True:
+    """Generate MJPEG stream for a camera while live capture is active."""
+    import time
+    while controller.is_running:
         frame = controller.get_display_frame(camera_name)
+        if frame is None:
+            cam = controller.video_manager.get_camera(camera_name)
+            if cam and cam.current_frame is not None:
+                frame = cam.get_display_frame() or cam.current_frame
+
         if frame is not None:
-            # Resize for streaming (reduce bandwidth)
+            # Resize for streaming (reduce bandwidth & smooth delivery)
             h, w = frame.shape[:2]
             if w > 640:
                 scale = 640 / w
                 frame = cv2.resize(frame, (640, int(h * scale)))
-            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ret:
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
         else:
-            # Send a blank frame placeholder
             blank = create_blank_frame(camera_name)
             ret, buffer = cv2.imencode('.jpg', blank)
             if ret:
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-        import time
         time.sleep(1.0 / 15)  # ~15fps stream
 
 
@@ -281,10 +289,31 @@ def create_blank_frame(camera_name: str):
 def api_camera_stream(camera):
     if camera not in VIDEO_SOURCES:
         return "Invalid camera", 404
+    if not controller.is_running:
+        blank = create_blank_frame(camera)
+        ret, buffer = cv2.imencode('.jpg', blank)
+        return Response(buffer.tobytes(), mimetype='image/jpeg', headers={'Cache-Control': 'no-cache, no-store, must-revalidate'})
+
     return Response(
         generate_mjpeg(camera),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
+        mimetype='multipart/x-mixed-replace; boundary=frame',
+        headers={'Cache-Control': 'no-cache, no-store, must-revalidate'}
     )
+
+
+@app.route("/api/capture/snapshot/<camera>")
+def api_camera_snapshot(camera):
+    if camera not in VIDEO_SOURCES:
+        return "Invalid camera", 404
+    frame = controller.get_display_frame(camera)
+    if frame is None:
+        cam = controller.video_manager.get_camera(camera)
+        if cam and cam.current_frame is not None:
+            frame = cam.get_display_frame() or cam.current_frame
+    if frame is None:
+        frame = create_blank_frame(camera)
+    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return Response(buffer.tobytes(), mimetype='image/jpeg', headers={'Cache-Control': 'no-cache'})
 
 @app.route("/api/videos/raw/<camera>")
 def api_video_raw(camera):

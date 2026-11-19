@@ -84,11 +84,9 @@ async function assignScreenCamera(screen, source) {
         const data = await res.json();
         if (data.success) {
             updateScreenAssignedBadge(screen, source);
-            // If live view is actively running, reload that camera's live MJPEG stream
-            if (isSessionActive) {
-                const img = document.getElementById('feed' + capitalize(screen));
-                if (img) img.src = `/api/capture/stream/${screen}?t=${Date.now()}`;
-            }
+            // Reload stream immediately on that screen box
+            const img = document.getElementById('feed' + capitalize(screen));
+            if (img) img.src = `/api/capture/stream/${screen}?t=${Date.now()}`;
         } else {
             alert('Failed to assign camera: ' + (data.error || 'Unknown error'));
         }
@@ -113,18 +111,21 @@ function setLiveUIState(isLive) {
         if (powerInd) powerInd.classList.add('active');
         if (powerText) powerText.textContent = 'LIVE VIEW ACTIVE (CAMERAS ON)';
         CAMERAS.forEach(cam => {
-            const overlay = document.getElementById('overlay' + capitalize(cam));
-            if (overlay) overlay.classList.add('hidden');
+            const statusTxt = document.getElementById('statusText' + capitalize(cam));
+            if (statusTxt) {
+                statusTxt.textContent = 'ONLINE';
+                statusTxt.style.color = 'var(--success)';
+            }
+            const dot = document.getElementById('dot' + capitalize(cam));
+            if (dot) dot.classList.add('active');
         });
     } else {
         if (powerInd) powerInd.classList.remove('active');
-        if (powerText) powerText.textContent = 'CAMERAS OFF (STANDBY)';
+        if (powerText) powerText.textContent = 'CAMERAS STANDBY';
         CAMERAS.forEach(cam => {
-            const overlay = document.getElementById('overlay' + capitalize(cam));
-            if (overlay) overlay.classList.remove('hidden');
             const statusTxt = document.getElementById('statusText' + capitalize(cam));
             if (statusTxt) {
-                statusTxt.textContent = 'CAM OFF';
+                statusTxt.textContent = 'STANDBY';
                 statusTxt.style.color = 'var(--text-muted)';
             }
             const dot = document.getElementById('dot' + capitalize(cam));
@@ -163,36 +164,71 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (sel) sel.value = parseFloat(cfg.capture_delay_seconds).toFixed(1);
         }
     } catch (e) {}
+
+    // 3. Sync UI with current capture session state
+    try {
+        const sRes = await fetch('/api/capture/status');
+        const sData = await sRes.json();
+        if (sData.is_running) {
+            setLiveUIState(true);
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnPause').disabled = false;
+            document.getElementById('btnStop').disabled = false;
+            CAMERAS.forEach(cam => {
+                const img = document.getElementById('feed' + capitalize(cam));
+                if (img) img.src = `/api/capture/stream/${cam}?t=${Date.now()}`;
+            });
+            startStatusPolling();
+        } else {
+            setLiveUIState(false);
+            document.getElementById('btnStart').disabled = false;
+            document.getElementById('btnPause').disabled = true;
+            document.getElementById('btnResume').disabled = true;
+            document.getElementById('btnStop').disabled = true;
+            CAMERAS.forEach(cam => {
+                const img = document.getElementById('feed' + capitalize(cam));
+                if (img) img.src = `/api/capture/stream/${cam}?t=${Date.now()}`;
+            });
+        }
+    } catch (e) {
+        setLiveUIState(false);
+    }
 });
 
 async function startCapture() {
     try {
-        document.getElementById('btnStart').disabled = true;
-        document.getElementById('captureSuccess').style.display = 'none';
+        const btnStart = document.getElementById('btnStart');
+        if (btnStart) btnStart.disabled = true;
+        const successBox = document.getElementById('captureSuccess');
+        if (successBox) successBox.style.display = 'none';
 
         const res = await fetch('/api/capture/start', { method: 'POST' });
         const data = await res.json();
 
         if (data.success) {
             setLiveUIState(true);
-            document.getElementById('btnPause').disabled = false;
-            document.getElementById('btnStop').disabled = false;
+            const btnPause = document.getElementById('btnPause');
+            const btnStop = document.getElementById('btnStop');
+            if (btnPause) btnPause.disabled = false;
+            if (btnStop) btnStop.disabled = false;
 
-            // Start MJPEG streams
+            // Start live MJPEG streams
+            const now = Date.now();
             CAMERAS.forEach(cam => {
                 const img = document.getElementById('feed' + capitalize(cam));
-                if (img) img.src = `/api/capture/stream/${cam}?t=${Date.now()}`;
+                if (img) img.src = `/api/capture/stream/${cam}?t=${now}`;
             });
 
             // Start status polling
             startStatusPolling();
         } else {
             alert('Start failed: ' + (data.error || 'Unknown error'));
-            document.getElementById('btnStart').disabled = false;
+            if (btnStart) btnStart.disabled = false;
         }
     } catch (e) {
         console.error('Start error:', e);
-        document.getElementById('btnStart').disabled = false;
+        const btnStart = document.getElementById('btnStart');
+        if (btnStart) btnStart.disabled = false;
         alert('Failed to start capture session');
     }
 }
@@ -223,15 +259,21 @@ async function stopCapture() {
         stopStatusPolling();
         setLiveUIState(false);
 
-        document.getElementById('btnStart').disabled = false;
-        document.getElementById('btnPause').disabled = true;
-        document.getElementById('btnResume').disabled = true;
-        document.getElementById('btnStop').disabled = true;
+        const btnStart = document.getElementById('btnStart');
+        const btnPause = document.getElementById('btnPause');
+        const btnResume = document.getElementById('btnResume');
+        const btnStop = document.getElementById('btnStop');
 
-        // Clear streams so browser disconnects from camera hardware
+        if (btnStart) btnStart.disabled = false;
+        if (btnPause) btnPause.disabled = true;
+        if (btnResume) btnResume.disabled = true;
+        if (btnStop) btnStop.disabled = true;
+
+        // Switch images to single standby placeholder frame
+        const now = Date.now();
         CAMERAS.forEach(cam => {
             const img = document.getElementById('feed' + capitalize(cam));
-            if (img) img.src = '';
+            if (img) img.src = `/api/capture/stream/${cam}?t=${now}`;
         });
     } catch (e) {
         console.error('Stop error:', e);
@@ -243,6 +285,29 @@ async function resetCapture() {
         await fetch('/api/capture/reset', { method: 'POST' });
         stopStatusPolling();
         setLiveUIState(false);
+
+        const btnStart = document.getElementById('btnStart');
+        const btnPause = document.getElementById('btnPause');
+        const btnResume = document.getElementById('btnResume');
+        const btnStop = document.getElementById('btnStop');
+
+        if (btnStart) btnStart.disabled = false;
+        if (btnPause) btnPause.disabled = true;
+        if (btnResume) btnResume.disabled = true;
+        if (btnStop) btnStop.disabled = true;
+
+        const successBox = document.getElementById('captureSuccess');
+        if (successBox) successBox.style.display = 'none';
+
+        const now = Date.now();
+        CAMERAS.forEach(cam => {
+            const img = document.getElementById('feed' + capitalize(cam));
+            if (img) img.src = `/api/capture/stream/${cam}?t=${now}`;
+        });
+    } catch (e) {
+        console.error('Reset error:', e);
+    }
+}
 
         document.getElementById('btnStart').disabled = false;
         document.getElementById('btnPause').disabled = true;

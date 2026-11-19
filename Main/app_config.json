@@ -1,6 +1,6 @@
 {
   "yolo_model": "yolov8n.pt",
-  "yolo_confidence": 0.45,
+  "yolo_confidence": 0.35,
   "yolo_process_fps": 8,
   "yolo_inference_size": 640,
   "stationary_duration": 2,
@@ -16,6 +16,8 @@
   "database_dir": "D:\\Project Costal star\\Data_base",
   "camera_sources": {
     "front": "0",
-    "left": "3"
+    "back": "video_back",
+    "left": "video_left",
+    "right": "video_right"
   }
 }

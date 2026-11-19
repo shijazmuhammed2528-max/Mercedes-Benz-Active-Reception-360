@@ -66,16 +66,11 @@
             </div>
             <div class="camera-status">
                 <span class="status-dot" id="dotFront"></span>
-                <span id="statusTextFront">CAM OFF</span>
+                <span id="statusTextFront">ONLINE</span>
             </div>
         </div>
         <div class="camera-feed" onclick="selectCameraView('front')" style="cursor:pointer;" title="Click to expand Front View">
-            <img id="feedFront" src="" alt="Front Camera Feed">
-            <div class="cam-off-overlay" id="overlayFront">
-                <i class="fas fa-video-slash cam-off-icon"></i>
-                <span class="cam-off-text">CAMERA OFF</span>
-                <small class="cam-off-assigned" id="assignedLabelFront">Assigned: Camera 0</small>
-            </div>
+            <img id="feedFront" src="/api/capture/stream/front" alt="Front Camera Feed">
         </div>
         <div class="camera-info">
             <span id="motionFront">—</span>
@@ -97,16 +92,11 @@
             </div>
             <div class="camera-status">
                 <span class="status-dot" id="dotBack"></span>
-                <span id="statusTextBack">CAM OFF</span>
+                <span id="statusTextBack">ONLINE</span>
             </div>
         </div>
         <div class="camera-feed" onclick="selectCameraView('back')" style="cursor:pointer;" title="Click to expand Rear View">
-            <img id="feedBack" src="" alt="Rear Camera Feed">
-            <div class="cam-off-overlay" id="overlayBack">
-                <i class="fas fa-video-slash cam-off-icon"></i>
-                <span class="cam-off-text">CAMERA OFF</span>
-                <small class="cam-off-assigned" id="assignedLabelBack">Assigned: Camera 1</small>
-            </div>
+            <img id="feedBack" src="/api/capture/stream/back" alt="Rear Camera Feed">
         </div>
         <div class="camera-info">
             <span id="motionBack">—</span>
@@ -128,16 +118,11 @@
             </div>
             <div class="camera-status">
                 <span class="status-dot" id="dotLeft"></span>
-                <span id="statusTextLeft">CAM OFF</span>
+                <span id="statusTextLeft">ONLINE</span>
             </div>
         </div>
         <div class="camera-feed" onclick="selectCameraView('left')" style="cursor:pointer;" title="Click to expand Left View">
-            <img id="feedLeft" src="" alt="Left Camera Feed">
-            <div class="cam-off-overlay" id="overlayLeft">
-                <i class="fas fa-video-slash cam-off-icon"></i>
-                <span class="cam-off-text">CAMERA OFF</span>
-                <small class="cam-off-assigned" id="assignedLabelLeft">Assigned: Camera 3</small>
-            </div>
+            <img id="feedLeft" src="/api/capture/stream/left" alt="Left Camera Feed">
         </div>
         <div class="camera-info">
             <span id="motionLeft">—</span>
@@ -159,16 +144,11 @@
             </div>
             <div class="camera-status">
                 <span class="status-dot" id="dotRight"></span>
-                <span id="statusTextRight">CAM OFF</span>
+                <span id="statusTextRight">ONLINE</span>
             </div>
         </div>
         <div class="camera-feed" onclick="selectCameraView('right')" style="cursor:pointer;" title="Click to expand Right View">
-            <img id="feedRight" src="" alt="Right Camera Feed">
-            <div class="cam-off-overlay" id="overlayRight">
-                <i class="fas fa-video-slash cam-off-icon"></i>
-                <span class="cam-off-text">CAMERA OFF</span>
-                <small class="cam-off-assigned" id="assignedLabelRight">Assigned: Camera 2</small>
-            </div>
+            <img id="feedRight" src="/api/capture/stream/right" alt="Right Camera Feed">
         </div>
         <div class="camera-info">
             <span id="motionRight">—</span>
@@ -190,9 +170,6 @@
     </button>
     <button class="btn btn-danger" id="btnStop" onclick="stopCapture()" disabled>
         <i class="fas fa-stop"></i> STOP (CAMERAS OFF)
-    </button>
-    <button class="btn btn-warning" id="btnReset" onclick="resetCapture()">
-        <i class="fas fa-undo"></i> RESET
     </button>
     <button class="btn btn-warning" id="btnReset" onclick="resetCapture()">
         <i class="fas fa-undo"></i> RESET

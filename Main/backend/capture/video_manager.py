@@ -41,8 +41,11 @@ class CameraStream:
         self.is_view_ok = False
         self.is_stationary = False
         self.confidence = 0.0
+        self._using_fallback = False
 
     def _is_device_source(self) -> bool:
+        if getattr(self, "_using_fallback", False):
+            return False
         if isinstance(self.video_path, int):
             return True
         if isinstance(self.video_path, str) and self.video_path.strip().isdigit():
@@ -56,31 +59,37 @@ class CameraStream:
 
     def open(self) -> bool:
         with self.lock:
+            self._using_fallback = False
             is_device = self._is_device_source()
             if not is_device and not os.path.isfile(str(self.video_path)):
-                logger.error("Video file not found: %s", self.video_path)
-                return False
+                from config import VIDEO_SOURCES
+                fallback_file = VIDEO_SOURCES.get(self.name)
+                if fallback_file and os.path.isfile(fallback_file):
+                    self.video_path = fallback_file
+                    is_device = False
+                else:
+                    logger.error("Video file not found: %s", self.video_path)
+                    return False
             try:
                 if is_device:
                     dev_idx = self._get_device_index()
                     backend = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
                     self.cap = cv2.VideoCapture(dev_idx, backend)
-                else:
-                    self.cap = cv2.VideoCapture(self.video_path)
-
-                if self.cap is None or not self.cap.isOpened():
-                    # Attempt fallback to prerecorded file if physical camera is unplugged
-                    if is_device:
+                    if self.cap is None or not self.cap.isOpened():
                         from config import VIDEO_SOURCES
                         fallback_file = VIDEO_SOURCES.get(self.name)
                         if fallback_file and os.path.isfile(fallback_file):
                             logger.warning("Camera index %s not connected for %s view. Falling back to %s",
                                            self.video_path, self.name, fallback_file)
                             self.cap = cv2.VideoCapture(fallback_file)
+                            self._using_fallback = True
+                            is_device = False
+                else:
+                    self.cap = cv2.VideoCapture(self.video_path)
 
-                    if self.cap is None or not self.cap.isOpened():
-                        logger.error("Cannot open stream: %s", self.video_path)
-                        return False
+                if self.cap is None or not self.cap.isOpened():
+                    logger.error("Cannot open stream: %s", self.video_path)
+                    return False
 
                 self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 24.0
                 if self.fps <= 0 or self.fps > 120:
@@ -90,8 +99,8 @@ class CameraStream:
                 self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) if not is_device else 0
                 self.is_open = True
                 self.frame_number = 0
-                logger.info("Opened %s (source: %s): %dx%d, %.1f fps",
-                            self.name, str(self.video_path), self.width, self.height, self.fps)
+                logger.info("Opened %s (source: %s, fallback=%s): %dx%d, %.1f fps",
+                            self.name, str(self.video_path), self._using_fallback, self.width, self.height, self.fps)
                 return True
             except Exception as e:
                 logger.error("Error opening %s: %s", self.video_path, e)
@@ -106,6 +115,7 @@ class CameraStream:
                 self.cap = None
                 self.is_open = False
             self.video_path = new_source
+            self._using_fallback = False
             if was_open:
                 return self.open()
             return True
@@ -116,11 +126,15 @@ class CameraStream:
                 return False
             ret, frame = self.cap.read()
             if not ret:
-                # Loop video file or mark as ended for device
+                # Loop video file seamlessly
                 if not self._is_device_source():
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     self.frame_number = 0
-                return False
+                    ret, frame = self.cap.read()
+                    if not ret:
+                        return False
+                else:
+                    return False
             self.original_frame = frame.copy()
             self.current_frame = frame
             self.frame_number = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) if not self._is_device_source() else self.frame_number + 1
@@ -142,31 +156,32 @@ class CameraStream:
             cls_name = self.detection.get("class_name", "vehicle")
             x1, y1, x2, y2 = bbox
 
-            # Green bounding box
+            # Bright Green bounding box with 3px border
             color = (0, 255, 102)  # #00FF66 in BGR
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
 
-            # Detection info
+            # Detection info badge above box
             label = f"{cls_name.upper()} {conf:.1%}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-            cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw + 10, y1), color, -1)
-            cv2.putText(frame, label, (x1 + 5, y1 - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
+            cv2.rectangle(frame, (x1, max(0, y1 - th - 12)), (x1 + tw + 12, max(th + 12, y1)), color, -1)
+            cv2.putText(frame, label, (x1 + 6, max(th + 4, y1 - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
 
             # Status bar at bottom of bbox
             status_text = f"{self.motion_state}"
             if self.is_view_ok:
                 status_text += " | VIEW OK"
-            cv2.putText(frame, status_text, (x1, y2 + 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            cv2.putText(frame, status_text, (x1, min(frame.shape[0] - 10, y2 + 22)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
         # Camera label overlay
-        cv2.putText(frame, self.label, (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(frame, self.label, (12, 32),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
 
-        # Status indicator
-        status_color = (0, 255, 102) if self.is_detected else (0, 0, 255)
-        cv2.circle(frame, (frame.shape[1] - 20, 20), 8, status_color, -1)
+        # Status indicator dot
+        status_color = (0, 255, 102) if self.is_detected else (0, 140, 255)
+        cv2.circle(frame, (frame.shape[1] - 20, 22), 9, status_color, -1)
+        cv2.circle(frame, (frame.shape[1] - 20, 22), 9, (255, 255, 255), 1)
 
         return frame
 

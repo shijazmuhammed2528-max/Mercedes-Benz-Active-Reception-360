@@ -37,7 +37,7 @@ CAMERA_DEVICE_MAP = {
 
 # ─── YOLO Configuration ───────────────────────────────────────
 YOLO_MODEL = "yolov8n.pt"           # lightweight; change to yolov8s.pt for better accuracy
-YOLO_CONFIDENCE = 0.45
+YOLO_CONFIDENCE = 0.35
 YOLO_VEHICLE_CLASSES = [2, 3, 5, 7]  # car, motorcycle, bus, truck (COCO IDs)
 YOLO_INFERENCE_SIZE = 640
 YOLO_PROCESS_FPS = 8                 # frames analysed per second per camera
