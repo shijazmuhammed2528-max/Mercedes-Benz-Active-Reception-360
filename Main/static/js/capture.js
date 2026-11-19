@@ -156,7 +156,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     } catch (e) {}
 
-    // 3. Sync UI with current capture session state
+    // 3. Sync UI with current capture session state — ensure live view runs on Live Capture
     try {
         const sRes = await fetch('/api/capture/status');
         const sData = await sRes.json();
@@ -171,13 +171,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (btnStop) btnStop.disabled = false;
             startStatusPolling();
         } else {
-            setLiveUIState(false);
-            if (btnStart) btnStart.disabled = false;
-            if (btnPause) btnPause.disabled = true;
-            if (btnStop) btnStop.disabled = true;
+            // Auto-start live view when entering Live Capture screen!
+            await startCapture();
         }
     } catch (e) {
-        setLiveUIState(false);
+        startCapture();
     }
 });
 

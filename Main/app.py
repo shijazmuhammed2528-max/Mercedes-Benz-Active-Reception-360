@@ -266,8 +266,11 @@ def generate_mjpeg(camera_name: str):
                         frame = cv2.resize(frame, (640, int(h * scale)))
                     ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     if ret:
+                        jpeg_bytes = buffer.tobytes()
                         yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                               b'Content-Type: image/jpeg\r\n'
+                               b'Content-Length: ' + str(len(jpeg_bytes)).encode() + b'\r\n\r\n'
+                               + jpeg_bytes + b'\r\n')
                     time.sleep(1.0 / 20)
                     continue
 
@@ -275,13 +278,16 @@ def generate_mjpeg(camera_name: str):
             blank = create_blank_frame(camera_name)
             ret, buffer = cv2.imencode('.jpg', blank, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ret:
+                jpeg_bytes = buffer.tobytes()
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                       b'Content-Type: image/jpeg\r\n'
+                       b'Content-Length: ' + str(len(jpeg_bytes)).encode() + b'\r\n\r\n'
+                       + jpeg_bytes + b'\r\n')
             time.sleep(0.2)  # 5fps for standby graphic saves CPU
         except GeneratorExit:
             break
         except Exception as e:
-            logger.debug("Stream error for %s: %s", camera_name, e)
+            logger.error("Stream error for %s: %s", camera_name, e)
             time.sleep(0.5)
 
 
@@ -306,6 +312,9 @@ def create_blank_frame(camera_name: str):
 def api_camera_stream(camera):
     if camera not in VIDEO_SOURCES:
         return "Invalid camera", 404
+    # Auto-start controller if not running so visual boxes stream live cameras immediately
+    if not controller.is_running:
+        controller.start()
 
     return Response(
         generate_mjpeg(camera),
