@@ -156,30 +156,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     } catch (e) {}
 
-    // 3. Sync UI with current capture session state — auto-start if not running
+    // 3. Sync UI with current capture session state
     try {
         const sRes = await fetch('/api/capture/status');
         const sData = await sRes.json();
+        const btnStart = document.getElementById('btnStart');
+        const btnPause = document.getElementById('btnPause');
+        const btnStop = document.getElementById('btnStop');
+
         if (sData.is_running) {
             setLiveUIState(true);
-            const btnStart = document.getElementById('btnStart');
-            const btnPause = document.getElementById('btnPause');
-            const btnStop = document.getElementById('btnStop');
             if (btnStart) btnStart.disabled = true;
             if (btnPause) btnPause.disabled = false;
             if (btnStop) btnStop.disabled = false;
-            CAMERAS.forEach(cam => {
-                const img = document.getElementById('feed' + capitalize(cam));
-                if (img) img.src = `/api/capture/stream/${cam}?t=${Date.now()}`;
-            });
             startStatusPolling();
         } else {
-            // Auto-launch live capture session so visual boxes stream immediately!
-            await startCapture();
+            setLiveUIState(false);
+            if (btnStart) btnStart.disabled = false;
+            if (btnPause) btnPause.disabled = true;
+            if (btnStop) btnStop.disabled = true;
         }
     } catch (e) {
-        // Fallback: start capture session
-        startCapture();
+        setLiveUIState(false);
     }
 });
 
@@ -199,13 +197,6 @@ async function startCapture() {
             const btnStop = document.getElementById('btnStop');
             if (btnPause) btnPause.disabled = false;
             if (btnStop) btnStop.disabled = false;
-
-            // Start live MJPEG streams
-            const now = Date.now();
-            CAMERAS.forEach(cam => {
-                const img = document.getElementById('feed' + capitalize(cam));
-                if (img) img.src = `/api/capture/stream/${cam}?t=${now}`;
-            });
 
             // Start status polling
             startStatusPolling();
@@ -257,12 +248,10 @@ async function stopCapture() {
         if (btnResume) btnResume.disabled = true;
         if (btnStop) btnStop.disabled = true;
 
-        // Switch images to single standby placeholder frame
-        const now = Date.now();
-        CAMERAS.forEach(cam => {
-            const img = document.getElementById('feed' + capitalize(cam));
-            if (img) img.src = `/api/capture/stream/${cam}?t=${now}`;
-        });
+        const stateDot = document.getElementById('stateDot');
+        const stateText = document.getElementById('stateText');
+        if (stateDot) stateDot.className = 'state-dot';
+        if (stateText) stateText.textContent = 'CAMERAS OFF (STANDBY)';
     } catch (e) {
         console.error('Stop error:', e);
     }

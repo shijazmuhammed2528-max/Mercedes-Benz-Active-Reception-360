@@ -71,7 +71,7 @@ class CaptureController:
         self.is_paused = False
         self._thread = None
         self._stop_event = threading.Event()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._captured = False
         self._capture_result = None
         self._plate_text = ""
@@ -177,49 +177,55 @@ class CaptureController:
 
     def start(self) -> dict:
         """Start a new capture session."""
-        if self.is_running:
+        with self._lock:
+            if self.is_running:
+                self._captured = False
+                self.capture_state.set("MONITORING")
+                return {"success": True, "session_id": self.session_id, "already_running": True}
+
+            self.is_running = True  # Mark immediately to prevent race conditions from concurrent stream requests
+
+            # Initialize YOLO if needed
+            if not self._yolo_ready:
+                if not self.initialize_yolo():
+                    self.is_running = False
+                    return {"success": False, "error": "Failed to initialize YOLO model"}
+
+            # Initialize OCR in background so camera startup is immediate
+            if not is_ocr_available():
+                threading.Thread(target=init_ocr, daemon=True).start()
+
+            # Open all cameras/videos
+            self.video_manager.reset_all()
+            self.video_manager.open_all()
+
+            # Seed display frames immediately so every stream gets valid visuals on frame 0
+            for name in CAMERA_NAMES:
+                cam = self.video_manager.get_camera(name)
+                if cam and cam.current_frame is not None:
+                    disp = cam.get_display_frame()
+                    self._display_frames[name] = disp if disp is not None else cam.current_frame
+
+            # Reset state
+            self.session_id = str(uuid.uuid4())[:8]
             self._captured = False
+            self._capture_result = None
+            self._plate_text = ""
+            self._ready_start_time = None
+            self._stop_event.clear()
+            self.is_paused = False
+            for md in self.motion_detectors.values():
+                md.reset()
+
             self.capture_state.set("MONITORING")
-            return {"success": True, "session_id": self.session_id, "already_running": True}
 
-        # Initialize YOLO if needed
-        if not self._yolo_ready:
-            if not self.initialize_yolo():
-                return {"success": False, "error": "Failed to initialize YOLO model"}
+            # Start single processing thread
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._processing_loop, daemon=True)
+                self._thread.start()
 
-        # Initialize OCR
-        if not is_ocr_available():
-            init_ocr()
-
-        # Open all cameras/videos
-        self.video_manager.reset_all()
-        results = self.video_manager.open_all()
-        failed = [name for name, ok in results.items() if not ok]
-        if len(failed) == len(self.video_manager.cameras):
-            return {"success": False, "error": f"Failed to open all cameras: {', '.join(failed)}"}
-        elif failed:
-            logger.warning("Some camera screens failed to open: %s (other screens remain active)", failed)
-
-        # Reset state
-        self.session_id = str(uuid.uuid4())[:8]
-        self._captured = False
-        self._capture_result = None
-        self._plate_text = ""
-        self._ready_start_time = None
-        self._stop_event.clear()
-        self.is_paused = False
-        for md in self.motion_detectors.values():
-            md.reset()
-
-        self.capture_state.set("MONITORING")
-        self.is_running = True
-
-        # Start processing thread
-        self._thread = threading.Thread(target=self._processing_loop, daemon=True)
-        self._thread.start()
-
-        logger.info("Capture session started: %s", self.session_id)
-        return {"success": True, "session_id": self.session_id}
+            logger.info("Capture session started: %s", self.session_id)
+            return {"success": True, "session_id": self.session_id}
 
     def pause(self) -> dict:
         if not self.is_running:
@@ -358,7 +364,8 @@ class CaptureController:
             return frame
         cam = self.video_manager.get_camera(camera)
         if cam and cam.current_frame is not None:
-            return cam.get_display_frame() or cam.current_frame
+            disp = cam.get_display_frame()
+            return disp if disp is not None else cam.current_frame
         return None
 
     # ─── Processing Loop ──────────────────────────────────────
@@ -409,6 +416,19 @@ class CaptureController:
                 cam = self.video_manager.get_camera(name)
                 if cam is None or cam.current_frame is None or not cam.is_open:
                     all_detected = False
+                    continue
+
+                # If camera device is not connected, skip YOLO and show clean NO SIGNAL frame
+                if not cam.is_connected:
+                    cam.detection = None
+                    cam.is_detected = False
+                    cam.confidence = 0.0
+                    cam.motion_state = "DISCONNECTED"
+                    cam.is_view_ok = False
+                    cam.is_stationary = False
+                    self.motion_detectors[name].update(None)
+                    all_detected = False
+                    self._display_frames[name] = cam.get_display_frame()
                     continue
 
                 # YOLO detection

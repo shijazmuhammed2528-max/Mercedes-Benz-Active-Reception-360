@@ -245,43 +245,60 @@ def api_cameras_mapping():
 # ═══════════════════════════════════════════════════════════════
 
 def generate_mjpeg(camera_name: str):
-    """Generate MJPEG stream for a camera while live capture is active."""
+    """Generate continuous MJPEG stream for a camera screen.
+    Streams live camera visuals when active, or standby graphic when cameras are off."""
     import time
-    while controller.is_running:
-        frame = controller.get_display_frame(camera_name)
-        if frame is None:
-            cam = controller.video_manager.get_camera(camera_name)
-            if cam and cam.current_frame is not None:
-                frame = cam.get_display_frame() or cam.current_frame
+    while True:
+        try:
+            if controller.is_running:
+                frame = controller.get_display_frame(camera_name)
+                if frame is None:
+                    cam = controller.video_manager.get_camera(camera_name)
+                    if cam and cam.current_frame is not None:
+                        disp = cam.get_display_frame()
+                        frame = disp if disp is not None else cam.current_frame
 
-        if frame is not None:
-            # Resize for streaming (reduce bandwidth & smooth delivery)
-            h, w = frame.shape[:2]
-            if w > 640:
-                scale = 640 / w
-                frame = cv2.resize(frame, (640, int(h * scale)))
-            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            if ret:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-        else:
+                if frame is not None:
+                    # Resize for streaming (reduce bandwidth & smooth delivery)
+                    h, w = frame.shape[:2]
+                    if w > 640:
+                        scale = 640 / w
+                        frame = cv2.resize(frame, (640, int(h * scale)))
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if ret:
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                    time.sleep(1.0 / 20)
+                    continue
+
+            # When cameras are off/standby
             blank = create_blank_frame(camera_name)
-            ret, buffer = cv2.imencode('.jpg', blank)
+            ret, buffer = cv2.imencode('.jpg', blank, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ret:
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-        time.sleep(1.0 / 15)  # ~15fps stream
+            time.sleep(0.2)  # 5fps for standby graphic saves CPU
+        except GeneratorExit:
+            break
+        except Exception as e:
+            logger.debug("Stream error for %s: %s", camera_name, e)
+            time.sleep(0.5)
 
 
 def create_blank_frame(camera_name: str):
-    """Create a blank placeholder frame indicating camera standby."""
+    """Create a high-contrast placeholder frame indicating camera standby."""
     import numpy as np
     frame = np.zeros((360, 640, 3), dtype=np.uint8)
     frame[:] = (18, 18, 18)
+    for y in range(0, 360, 45):
+        cv2.line(frame, (0, y), (640, y), (28, 28, 28), 1)
+    for x in range(0, 640, 64):
+        cv2.line(frame, (x, 0), (x, 360), (28, 28, 28), 1)
     label = CAMERA_LABELS.get(camera_name, camera_name.upper())
-    cv2.putText(frame, label, (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (140, 140, 140), 2)
-    cv2.putText(frame, "CAMERAS OFF (STANDBY)", (150, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (180, 180, 180), 2)
-    cv2.putText(frame, "Click START LIVE VIEW to Activate", (170, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
+    cv2.putText(frame, label, (24, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (160, 160, 160), 2)
+    cv2.putText(frame, "CAMERAS OFF (STANDBY)", (150, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (180, 180, 180), 2)
+    cv2.putText(frame, "Click START LIVE VIEW to Activate", (170, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (110, 110, 110), 1)
+    cv2.circle(frame, (640 - 24, 24), 8, (80, 80, 80), -1)
     return frame
 
 
@@ -289,9 +306,6 @@ def create_blank_frame(camera_name: str):
 def api_camera_stream(camera):
     if camera not in VIDEO_SOURCES:
         return "Invalid camera", 404
-    # Auto-start controller if not running so visual boxes stream immediately
-    if not controller.is_running:
-        controller.start()
 
     return Response(
         generate_mjpeg(camera),
@@ -308,7 +322,8 @@ def api_camera_snapshot(camera):
     if frame is None:
         cam = controller.video_manager.get_camera(camera)
         if cam and cam.current_frame is not None:
-            frame = cam.get_display_frame() or cam.current_frame
+            disp = cam.get_display_frame()
+            frame = disp if disp is not None else cam.current_frame
     if frame is None:
         frame = create_blank_frame(camera)
     ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -515,10 +530,14 @@ if __name__ == "__main__":
     logger.info("Dashboard: http://%s:%d", HOST, PORT)
     logger.info("Database dir: %s", DATABASE_DIR)
 
-    # Pre-initialize YOLO and auto-start capture engine in background
-    def _init():
+    # Pre-warm YOLO & OCR models in background so live view starts instantly
+    def _prewarm():
         controller.initialize_yolo()
-        controller.start()
-    threading.Thread(target=_init, daemon=True).start()
+        try:
+            from backend.vision.plate_recognition import init_ocr
+            init_ocr()
+        except Exception:
+            pass
+    threading.Thread(target=_prewarm, daemon=True).start()
 
     app.run(host=HOST, port=PORT, debug=DEBUG, threaded=True, use_reloader=False)

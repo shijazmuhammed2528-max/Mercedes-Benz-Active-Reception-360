@@ -21,7 +21,7 @@ class HardwareDeviceManager:
     preventing Windows DirectShow exclusive device lock conflicts.
     """
     _instance = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self):
         self._devices = {}  # dev_idx -> cv2.VideoCapture
@@ -86,6 +86,11 @@ class HardwareDeviceManager:
         with self._lock:
             return self._resolutions.get(dev_idx, (640, 480))
 
+    def get_latest_frame(self, dev_idx: int) -> np.ndarray | None:
+        with self._lock:
+            f = self._latest_frames.get(dev_idx)
+            return f.copy() if f is not None else None
+
     def release_device(self, dev_idx: int):
         with self._lock:
             cap = self._devices.pop(dev_idx, None)
@@ -118,7 +123,7 @@ class CameraStream:
         self.video_path = video_path
         self.label = label
         self.cap = None  # Used only if explicitly streaming a video file
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.current_frame = None
         self.original_frame = None  # Unmodified frame for capture
         self.frame_number = 0
@@ -166,10 +171,16 @@ class CameraStream:
                     w, h = self.hw_manager.get_resolution(dev_idx)
                     self.width = w
                     self.height = h
+                    latest = self.hw_manager.get_latest_frame(dev_idx)
+                    if latest is not None:
+                        self.current_frame = latest.copy()
+                        self.original_frame = latest.copy()
                     logger.info("Screen '%s' connected to physical Camera %d (%dx%d)", self.name, dev_idx, w, h)
                 else:
                     self.width = 640
                     self.height = 360
+                    self.current_frame = self._create_no_signal_frame()
+                    self.original_frame = self.current_frame.copy()
                     logger.info("Screen '%s' assigned to Camera %d (Device not plugged in)", self.name, dev_idx)
                 return True
             else:
