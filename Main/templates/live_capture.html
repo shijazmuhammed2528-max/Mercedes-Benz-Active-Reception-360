@@ -70,7 +70,7 @@
             </div>
         </div>
         <div class="camera-feed" onclick="selectCameraView('front')" style="cursor:pointer;" title="Click to expand Front View">
-            <img id="feedFront" src="/api/capture/stream/front" alt="Front Camera Feed">
+            <img id="feedFront" src="/api/capture/stream/front" alt="Front Camera Feed" onerror="setTimeout(()=>{if(this.src)this.src='/api/capture/stream/front?t='+Date.now();},1500)">
         </div>
         <div class="camera-info">
             <span id="motionFront">—</span>
@@ -96,7 +96,7 @@
             </div>
         </div>
         <div class="camera-feed" onclick="selectCameraView('back')" style="cursor:pointer;" title="Click to expand Rear View">
-            <img id="feedBack" src="/api/capture/stream/back" alt="Rear Camera Feed">
+            <img id="feedBack" src="/api/capture/stream/back" alt="Rear Camera Feed" onerror="setTimeout(()=>{if(this.src)this.src='/api/capture/stream/back?t='+Date.now();},1500)">
         </div>
         <div class="camera-info">
             <span id="motionBack">—</span>
@@ -122,7 +122,7 @@
             </div>
         </div>
         <div class="camera-feed" onclick="selectCameraView('left')" style="cursor:pointer;" title="Click to expand Left View">
-            <img id="feedLeft" src="/api/capture/stream/left" alt="Left Camera Feed">
+            <img id="feedLeft" src="/api/capture/stream/left" alt="Left Camera Feed" onerror="setTimeout(()=>{if(this.src)this.src='/api/capture/stream/left?t='+Date.now();},1500)">
         </div>
         <div class="camera-info">
             <span id="motionLeft">—</span>
@@ -148,7 +148,7 @@
             </div>
         </div>
         <div class="camera-feed" onclick="selectCameraView('right')" style="cursor:pointer;" title="Click to expand Right View">
-            <img id="feedRight" src="/api/capture/stream/right" alt="Right Camera Feed">
+            <img id="feedRight" src="/api/capture/stream/right" alt="Right Camera Feed" onerror="setTimeout(()=>{if(this.src)this.src='/api/capture/stream/right?t='+Date.now();},1500)">
         </div>
         <div class="camera-info">
             <span id="motionRight">—</span>
@@ -263,5 +263,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/capture.js"></script>
+<script src="/static/js/capture.js?v=2.2"></script>
 {% endblock %}

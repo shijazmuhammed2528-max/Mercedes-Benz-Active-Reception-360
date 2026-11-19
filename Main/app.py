@@ -289,10 +289,9 @@ def create_blank_frame(camera_name: str):
 def api_camera_stream(camera):
     if camera not in VIDEO_SOURCES:
         return "Invalid camera", 404
+    # Auto-start controller if not running so visual boxes stream immediately
     if not controller.is_running:
-        blank = create_blank_frame(camera)
-        ret, buffer = cv2.imencode('.jpg', blank)
-        return Response(buffer.tobytes(), mimetype='image/jpeg', headers={'Cache-Control': 'no-cache, no-store, must-revalidate'})
+        controller.start()
 
     return Response(
         generate_mjpeg(camera),
@@ -516,9 +515,10 @@ if __name__ == "__main__":
     logger.info("Dashboard: http://%s:%d", HOST, PORT)
     logger.info("Database dir: %s", DATABASE_DIR)
 
-    # Pre-initialize YOLO in background
+    # Pre-initialize YOLO and auto-start capture engine in background
     def _init():
         controller.initialize_yolo()
+        controller.start()
     threading.Thread(target=_init, daemon=True).start()
 
     app.run(host=HOST, port=PORT, debug=DEBUG, threaded=True, use_reloader=False)
