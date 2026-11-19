@@ -500,7 +500,12 @@ async function pollStatus() {
             if (delayLabel) delayLabel.textContent = 'Capture delay verified';
         }
 
-        // Capture success
+        // Pending capture awaiting confirmation
+        if (data.pending_capture && typeof showConfirmModal === 'function') {
+            showConfirmModal(data.pending_capture);
+        }
+
+        // Capture success (after user confirmed and saved)
         if (data.captured && data.capture_result) {
             showCaptureSuccess(data.capture_result, data.plate_text);
         }
@@ -530,6 +535,8 @@ function updateStateIndicator(state, message) {
             dot.classList.add('detected'); break;
         case 'CAPTURE_READY':
         case 'CAPTURING':
+        case 'AWAITING_CONFIRMATION':
+        case 'CONFIRM_PENDING':
             dot.classList.add('capturing'); break;
         case 'CAPTURED':
         case 'SAVED':

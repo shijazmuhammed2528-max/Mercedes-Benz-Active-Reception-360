@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Mercedes-Benz Active Reception{% endblock %}</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=3.1">
+    <link rel="stylesheet" href="/static/css/style.css?v=3.3">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     {% block head %}{% endblock %}
@@ -58,6 +58,116 @@
         {% block content %}{% endblock %}
     </main>
 
+    <!-- Vehicle Reception Confirmation Modal (User Approval Before Database Entry) -->
+    <div class="confirm-modal-overlay" id="vehicleConfirmModal">
+        <div class="confirm-modal-card">
+            <!-- Header: Small size bumper plate and date/time in header -->
+            <div class="confirm-modal-header">
+                <div class="confirm-header-left">
+                    <div class="confirm-title-badge">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>CONFIRM VEHICLE ENTRY</span>
+                    </div>
+
+                    <div class="confirm-header-meta">
+                        <div class="confirm-plate-box" title="Vehicle bumper plate (editable before saving)">
+                            <span class="confirm-meta-label"><i class="fas fa-id-card"></i> BUMPER PLATE:</span>
+                            <input type="text" id="confirmPlateInput" class="confirm-plate-input" placeholder="ENTER REGISTRATION" maxlength="20" title="Click to edit registration number before saving">
+                        </div>
+                        <div class="confirm-datetime-box" title="Capture date & time">
+                            <span class="confirm-meta-label"><i class="far fa-clock"></i> DATE &amp; TIME:</span>
+                            <span id="confirmDateTimeText" class="confirm-datetime-val">—</span>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="confirm-close-btn" onclick="discardPendingCapture()" title="Discard this capture and retake">&times;</button>
+            </div>
+
+            <!-- Body: 4 Camera Inspection Views -->
+            <div class="confirm-modal-body">
+                <div class="confirm-grid-4">
+                    <!-- FRONT VIEW -->
+                    <div class="confirm-card">
+                        <div class="confirm-card-bar">
+                            <span><i class="fas fa-camera"></i> FRONT VIEW</span>
+                            <span id="confirmBadgeFront" class="confirm-card-badge">VERIFIED</span>
+                        </div>
+                        <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox(document.getElementById('confirmImgFront').src)">
+                            <img id="confirmImgFront" src="" alt="Front View Photo">
+                        </div>
+                    </div>
+
+                    <!-- REAR VIEW -->
+                    <div class="confirm-card">
+                        <div class="confirm-card-bar">
+                            <span><i class="fas fa-camera"></i> REAR VIEW</span>
+                            <span id="confirmBadgeBack" class="confirm-card-badge">VERIFIED</span>
+                        </div>
+                        <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox(document.getElementById('confirmImgBack').src)">
+                            <img id="confirmImgBack" src="" alt="Rear View Photo">
+                        </div>
+                    </div>
+
+                    <!-- LEFT VIEW -->
+                    <div class="confirm-card">
+                        <div class="confirm-card-bar">
+                            <span><i class="fas fa-camera"></i> LEFT VIEW</span>
+                            <span id="confirmBadgeLeft" class="confirm-card-badge">VERIFIED</span>
+                        </div>
+                        <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox(document.getElementById('confirmImgLeft').src)">
+                            <img id="confirmImgLeft" src="" alt="Left View Photo">
+                        </div>
+                    </div>
+
+                    <!-- RIGHT VIEW -->
+                    <div class="confirm-card">
+                        <div class="confirm-card-bar">
+                            <span><i class="fas fa-camera"></i> RIGHT VIEW</span>
+                            <span id="confirmBadgeRight" class="confirm-card-badge">VERIFIED</span>
+                        </div>
+                        <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox(document.getElementById('confirmImgRight').src)">
+                            <img id="confirmImgRight" src="" alt="Right View Photo">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer: Actions -->
+            <div class="confirm-modal-footer">
+                <div class="confirm-footer-hint">
+                    <i class="fas fa-info-circle"></i>
+                    <span>Please verify the 4 camera photos and bumper plate before committing to the database.</span>
+                </div>
+                <div class="confirm-footer-actions">
+                    <button type="button" class="btn btn-danger" id="btnDiscardCapture" onclick="discardPendingCapture()">
+                        <i class="fas fa-times-circle"></i> DISCARD / RETAKE
+                    </button>
+                    <button type="button" class="btn btn-success" id="btnConfirmCapture" onclick="confirmAndSaveCapture()">
+                        <i class="fas fa-check-circle"></i> CONFIRM &amp; SAVE TO DATABASE
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox Modal -->
+    <div class="lightbox-overlay" id="lightboxOverlay" onclick="this.classList.remove('show')">
+        <img id="lightboxImg" src="" alt="Expanded View">
+    </div>
+
+    <script>
+        function openLightbox(src) {
+            if (!src) return;
+            const lb = document.getElementById('lightboxOverlay');
+            const img = document.getElementById('lightboxImg');
+            if (lb && img) {
+                img.src = src;
+                lb.classList.add('show');
+            }
+        }
+    </script>
+
+    <script src="/static/js/confirm_modal.js?v=1.0"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

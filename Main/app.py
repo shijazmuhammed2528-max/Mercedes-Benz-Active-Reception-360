@@ -191,6 +191,55 @@ def api_capture_reset():
 def api_capture_status():
     return jsonify(controller.get_status())
 
+@app.route("/api/capture/pending", methods=["GET"])
+def api_capture_pending():
+    """Get currently pending capture awaiting user confirmation."""
+    p = controller._pending_capture
+    return jsonify({
+        "has_pending": p is not None,
+        "pending": p
+    })
+
+@app.route("/api/capture/pending/image/<camera>")
+def api_capture_pending_image(camera):
+    """Serve image bytes of a camera from the pending capture."""
+    from flask import Response, redirect
+    ok, img_bytes = controller.get_pending_image(camera)
+    if not ok or not img_bytes:
+        return redirect(f"/api/capture/snapshot/{camera}")
+    return Response(img_bytes, mimetype="image/jpeg", headers={
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    })
+
+@app.route("/api/capture/confirm", methods=["POST"])
+def api_capture_confirm():
+    """User confirms vehicle capture — writes to SQLite database and saves images."""
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    vehicle_number = data.get("vehicle_number")
+    res = controller.confirm_capture(session_id=session_id, confirmed_vehicle_number=vehicle_number)
+    return jsonify(res)
+
+@app.route("/api/capture/discard", methods=["POST"])
+def api_capture_discard():
+    """User discards pending capture — removes temp images and resumes monitoring."""
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    res = controller.discard_capture(session_id=session_id)
+    return jsonify(res)
+
+@app.route("/api/capture/trigger", methods=["POST"])
+def api_capture_trigger():
+    """Manually trigger a capture cycle into pending confirmation."""
+    controller._do_capture()
+    return jsonify({
+        "success": True,
+        "has_pending": controller._pending_capture is not None,
+        "pending": controller._pending_capture
+    })
+
 @app.route("/api/capture/set-plate", methods=["POST"])
 def api_set_plate():
     data = request.get_json() or {}

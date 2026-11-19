@@ -73,6 +73,7 @@ class CaptureController:
         self._stop_event = threading.Event()
         self._lock = threading.RLock()
         self._captured = False
+        self._pending_capture = None
         self._capture_result = None
         self._plate_text = ""
         self._last_capture_time = 0
@@ -261,6 +262,15 @@ class CaptureController:
         self.is_running = False
         self.is_paused = False
         self._captured = False
+        if self._pending_capture:
+            p_folder = self._pending_capture.get("pending_folder")
+            if p_folder and os.path.isdir(p_folder):
+                try:
+                    import shutil
+                    shutil.rmtree(p_folder, ignore_errors=True)
+                except Exception:
+                    pass
+        self._pending_capture = None
         self._capture_result = None
         self._ready_start_time = None
         self.video_manager.release_all()
@@ -353,6 +363,7 @@ class CaptureController:
             "conditions": conditions,
             "plate_text": self._plate_text,
             "capture_result": self._capture_result,
+            "pending_capture": self._pending_capture,
             "yolo_ready": self._yolo_ready,
             "capture_delay_seconds": delay_needed,
             "ready_countdown": ready_countdown,
@@ -486,7 +497,7 @@ class CaptureController:
                 self._display_frames[name] = cam.get_display_frame()
 
             # Update capture state
-            if not self._captured:
+            if not self._captured and self._pending_capture is None:
                 if not any_detected:
                     self._ready_start_time = None
                     self.capture_state.set("MONITORING", "Waiting for vehicle...")
@@ -534,9 +545,12 @@ class CaptureController:
         logger.info("Processing loop ended")
 
     def _do_capture(self):
-        """Capture images from all four cameras."""
-        self.capture_state.set("CAPTURING", "Capturing images...")
-        logger.info("Starting capture...")
+        """
+        Stage captured images from all four cameras and prepare for user confirmation.
+        Does NOT insert into database until the user explicitly confirms!
+        """
+        self.capture_state.set("CAPTURING", "Capturing vehicle images...")
+        logger.info("Starting vehicle capture for user confirmation...")
 
         try:
             now = datetime.now()
@@ -557,16 +571,14 @@ class CaptureController:
                 plate_text = "UNKNOWN"
             self._plate_text = plate_text
 
-            # Create folder
+            # Create pending staging folder
             from config import DATABASE_DIR
-            plate_norm = plate_text.replace(" ", "_").replace("-", "_")
-            time_part = now.strftime("%I-%M-%S_%p")
-            folder_name = f"{plate_norm}_{capture_date}_{time_part}"
-            folder_path = os.path.join(DATABASE_DIR, folder_name)
-            os.makedirs(folder_path, exist_ok=True)
+            pending_folder = os.path.join(DATABASE_DIR, "_pending", session_id)
+            os.makedirs(pending_folder, exist_ok=True)
 
-            # Capture and save images
+            # Capture and save images to pending folder
             confidences = {}
+            sharpness_scores = {}
             min_sharpness = self.config.get("min_sharpness", 30.0)
 
             for name in CAMERA_NAMES:
@@ -583,67 +595,180 @@ class CaptureController:
                     sharpness = compute_sharpness(best_frame) if best_frame is not None else 0
 
                 if best_frame is not None:
-                    img_path = os.path.join(folder_path, f"{name}.jpg")
+                    img_path = os.path.join(pending_folder, f"{name}.jpg")
                     cv2.imwrite(img_path, best_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-                    logger.info("Saved %s (sharpness: %.1f)", img_path, sharpness)
+                    logger.info("Pending image saved: %s (sharpness: %.1f)", img_path, sharpness)
 
-                confidences[name] = cam.confidence
+                confidences[name] = round(float(cam.confidence or 0.0), 3)
+                sharpness_scores[name] = round(float(sharpness), 1)
 
-            # Save metadata
-            metadata = {
+            # Store pending capture metadata awaiting confirmation
+            self._pending_capture = {
+                "session_id": session_id,
                 "vehicle_number": plate_text,
-                "vehicle_number_normalized": plate_text.replace(" ", "").replace("-", ""),
                 "capture_date": capture_date,
                 "capture_time_12h": capture_time_12h,
                 "capture_timestamp": capture_timestamp,
-                "session_id": session_id,
+                "confidences": confidences,
+                "sharpness": sharpness_scores,
+                "pending_folder": pending_folder,
+                "images": {
+                    name: f"/api/capture/pending/image/{name}?sid={session_id}&t={int(time.time()*1000)}"
+                    for name in CAMERA_NAMES
+                }
+            }
+
+            self.capture_state.set("AWAITING_CONFIRMATION", f"Vehicle captured ({plate_text}) — Please review and confirm to save...")
+            logger.info("Vehicle captured. Awaiting confirmation for session %s (Plate: %s)", session_id, plate_text)
+
+        except Exception as e:
+            logger.error("Capture staging failed: %s", e, exc_info=True)
+            self.capture_state.set("ERROR", f"Capture failed: {str(e)}")
+
+    def confirm_capture(self, session_id: str = None, confirmed_vehicle_number: str = None) -> dict:
+        """
+        User confirmed vehicle capture!
+        Writes record into SQLite database, saves images to permanent folder, and records metadata.
+        """
+        with self._lock:
+            if not self._pending_capture:
+                return {"success": False, "error": "No pending capture awaiting confirmation"}
+
+            p = self._pending_capture
+            if session_id and p.get("session_id") != session_id:
+                return {"success": False, "error": "Session ID mismatch for pending capture"}
+
+            from config import DATABASE_DIR
+            pending_folder = p["pending_folder"]
+            plate_text = confirmed_vehicle_number.strip().upper() if confirmed_vehicle_number else p["vehicle_number"]
+            if not plate_text:
+                plate_text = "UNKNOWN"
+
+            now = datetime.now()
+            time_part = now.strftime("%I-%M-%S_%p")
+            plate_norm = plate_text.replace(" ", "_").replace("-", "_")
+            folder_name = f"{plate_norm}_{p['capture_date']}_{time_part}"
+            final_folder_path = os.path.join(DATABASE_DIR, folder_name)
+            os.makedirs(final_folder_path, exist_ok=True)
+
+            # Copy images from pending staging to permanent folder
+            import shutil
+            for name in CAMERA_NAMES:
+                src_img = os.path.join(pending_folder, f"{name}.jpg")
+                dst_img = os.path.join(final_folder_path, f"{name}.jpg")
+                if os.path.isfile(src_img):
+                    try:
+                        shutil.copy2(src_img, dst_img)
+                    except Exception as e:
+                        logger.error("Failed copying %s to %s: %s", src_img, dst_img, e)
+
+            # Save metadata.json
+            metadata = {
+                "vehicle_number": plate_text,
+                "vehicle_number_normalized": plate_text.replace(" ", "").replace("-", ""),
+                "capture_date": p["capture_date"],
+                "capture_time_12h": p["capture_time_12h"],
+                "capture_timestamp": p["capture_timestamp"],
+                "session_id": p["session_id"],
                 "camera_count": 4,
                 "capture_status": "success",
                 "images": {name: f"{name}.jpg" for name in CAMERA_NAMES},
-                "camera_source_videos": {
-                    "front": "front.mp4", "back": "back.mp4",
-                    "left": "left.mp4", "right": "right.mp4"
-                },
-                "detection_confidence": confidences,
+                "detection_confidence": p["confidences"],
             }
-            meta_path = os.path.join(folder_path, "metadata.json")
+            meta_path = os.path.join(final_folder_path, "metadata.json")
             with open(meta_path, "w") as f:
                 json.dump(metadata, f, indent=2)
 
             # Insert into database
             db_data = {
-                "session_id": session_id,
+                "session_id": p["session_id"],
                 "vehicle_number": plate_text,
                 "vehicle_number_normalized": plate_text.replace(" ", "").replace("-", ""),
-                "capture_date": capture_date,
-                "capture_timestamp": capture_timestamp,
-                "capture_time_12h": capture_time_12h,
-                "folder_path": folder_path,
-                "front_image_path": os.path.join(folder_path, "front.jpg"),
-                "back_image_path": os.path.join(folder_path, "back.jpg"),
-                "left_image_path": os.path.join(folder_path, "left.jpg"),
-                "right_image_path": os.path.join(folder_path, "right.jpg"),
-                "front_confidence": confidences.get("front", 0),
-                "back_confidence": confidences.get("back", 0),
-                "left_confidence": confidences.get("left", 0),
-                "right_confidence": confidences.get("right", 0),
+                "capture_date": p["capture_date"],
+                "capture_timestamp": p["capture_timestamp"],
+                "capture_time_12h": p["capture_time_12h"],
+                "folder_path": final_folder_path,
+                "front_image_path": os.path.join(final_folder_path, "front.jpg"),
+                "back_image_path": os.path.join(final_folder_path, "back.jpg"),
+                "left_image_path": os.path.join(final_folder_path, "left.jpg"),
+                "right_image_path": os.path.join(final_folder_path, "right.jpg"),
+                "front_confidence": p["confidences"].get("front", 0),
+                "back_confidence": p["confidences"].get("back", 0),
+                "left_confidence": p["confidences"].get("left", 0),
+                "right_confidence": p["confidences"].get("right", 0),
                 "capture_status": "success",
             }
             self.db.insert_session(db_data)
 
+            # Clean up pending folder
+            try:
+                shutil.rmtree(pending_folder, ignore_errors=True)
+            except Exception:
+                pass
+
             self._captured = True
             self._last_capture_time = time.time()
             self._capture_result = {
-                "session_id": session_id,
+                "session_id": p["session_id"],
                 "vehicle_number": plate_text,
-                "capture_date": capture_date,
-                "capture_time_12h": capture_time_12h,
-                "folder_path": folder_path,
-                "confidences": confidences,
+                "capture_date": p["capture_date"],
+                "capture_time_12h": p["capture_time_12h"],
+                "folder_path": final_folder_path,
+                "confidences": p["confidences"],
             }
-            self.capture_state.set("SAVED", "Capture saved successfully!")
-            logger.info("Capture completed: %s -> %s", session_id, folder_path)
+            self._plate_text = plate_text
+            self._pending_capture = None
+            self.capture_state.set("SAVED", f"Vehicle {plate_text} saved to database successfully!")
+            logger.info("Vehicle confirmed & saved to database: %s -> %s", p["session_id"], final_folder_path)
 
-        except Exception as e:
-            logger.error("Capture failed: %s", e, exc_info=True)
-            self.capture_state.set("ERROR", f"Capture failed: {str(e)}")
+            return {
+                "success": True,
+                "session_id": p["session_id"],
+                "vehicle_number": plate_text,
+                "folder_path": final_folder_path,
+                "capture_date": p["capture_date"],
+                "capture_time_12h": p["capture_time_12h"]
+            }
+
+    def discard_capture(self, session_id: str = None) -> dict:
+        """
+        User discarded the pending capture.
+        Deletes temporary pending files, does NOT touch database, and resumes monitoring.
+        """
+        with self._lock:
+            if not self._pending_capture:
+                return {"success": True, "message": "No pending capture to discard"}
+
+            p = self._pending_capture
+            pending_folder = p.get("pending_folder")
+            if pending_folder and os.path.isdir(pending_folder):
+                try:
+                    import shutil
+                    shutil.rmtree(pending_folder, ignore_errors=True)
+                except Exception as e:
+                    logger.warning("Error deleting pending folder %s: %s", pending_folder, e)
+
+            self._pending_capture = None
+            self._captured = False
+            self._ready_start_time = None
+            self._last_capture_time = time.time()
+            self.capture_state.set("MONITORING", "Capture discarded. Resuming vehicle monitoring...")
+            logger.info("Pending capture %s discarded. Resumed monitoring.", p.get("session_id"))
+            return {"success": True, "message": "Capture discarded"}
+
+    def get_pending_image(self, camera_name: str) -> tuple[bool, bytes | None]:
+        """Return image bytes of a camera from the pending capture."""
+        with self._lock:
+            if not self._pending_capture:
+                return False, None
+            pending_folder = self._pending_capture.get("pending_folder")
+            if not pending_folder:
+                return False, None
+            img_path = os.path.join(pending_folder, f"{camera_name}.jpg")
+            if os.path.isfile(img_path):
+                try:
+                    with open(img_path, "rb") as f:
+                        return True, f.read()
+                except Exception:
+                    return False, None
+            return False, None
