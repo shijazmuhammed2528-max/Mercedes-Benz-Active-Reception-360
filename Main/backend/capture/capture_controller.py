@@ -612,10 +612,11 @@ class CaptureController:
                 sharpness_scores[name] = round(float(sharpness), 1)
 
             # Automatic Number Plate Identification across all cameras
-            detected_plate = ""
-            best_ocr_conf = 0.0
+            from backend.vision.plate_recognition import is_full_plate, parse_indian_plate
+            found_full_plates = []
+            found_partials = []
 
-            # Scan front and back cameras first (standard license plate locations), then left/right
+            # Scan front and back cameras first (primary plate mounts), then left/right
             for name in ["front", "back", "left", "right"]:
                 frame_to_ocr = captured_frames.get(name)
                 if frame_to_ocr is None:
@@ -628,13 +629,34 @@ class CaptureController:
                 if plate_res.get("success") and plate_res.get("text"):
                     text = plate_res["text"].strip().upper()
                     conf = float(plate_res.get("confidence", 0.0))
-                    # Prioritize Indian pattern or highest OCR confidence
-                    if conf > best_ocr_conf or not detected_plate:
-                        detected_plate = text
-                        best_ocr_conf = conf
-                        logger.info("Auto-identified license plate from %s: %s (conf: %.2f)", name, text, conf)
-                        if conf >= 0.55:
+                    is_full = plate_res.get("is_full", False) or is_full_plate(text)
+
+                    if is_full:
+                        logger.info("Auto-identified FULL license plate from %s: %s (conf: %.2f)", name, text, conf)
+                        found_full_plates.append({"text": text, "conf": conf, "cam": name})
+                        if conf >= 0.70:
                             break
+                    else:
+                        logger.info("Partial plate fragment from %s: %s (conf: %.2f)", name, text, conf)
+                        found_partials.append({"text": text, "conf": conf, "cam": name, "raw": plate_res.get("raw", text)})
+
+            # Decide on the best plate: ALWAYS prioritize a full registration over a 4-digit number
+            detected_plate = ""
+            if found_full_plates:
+                found_full_plates.sort(key=lambda x: x["conf"], reverse=True)
+                detected_plate = found_full_plates[0]["text"]
+            elif len(found_partials) >= 2:
+                # Try combining partial fragments (e.g. state code from one camera + digits from another)
+                combined_raw = " ".join([p["raw"] for p in found_partials])
+                comb_parsed, comb_is_full = parse_indian_plate(combined_raw)
+                if comb_is_full and comb_parsed:
+                    detected_plate = comb_parsed
+                else:
+                    found_partials.sort(key=lambda x: (len(x["text"]), x["conf"]), reverse=True)
+                    detected_plate = found_partials[0]["text"]
+            elif found_partials:
+                found_partials.sort(key=lambda x: (len(x["text"]), x["conf"]), reverse=True)
+                detected_plate = found_partials[0]["text"]
 
             plate_text = detected_plate if detected_plate else "UNKNOWN"
             self._plate_text = plate_text

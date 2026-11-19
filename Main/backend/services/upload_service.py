@@ -290,16 +290,34 @@ def process_multi_vehicle_media(
     if not results_by_cam:
         return {"success": False, "error": "None of the uploaded files could be analyzed."}
 
-    # Determine consolidated license plate
+    # Determine consolidated license plate with strict preference for full registrations
+    from backend.vision.plate_recognition import is_full_plate, parse_indian_plate
     final_plate = "UNKNOWN"
     if vehicle_number_override.strip():
         final_plate = vehicle_number_override.strip().upper()
-    elif "front" in results_by_cam and results_by_cam["front"].get("plate_text"):
-        final_plate = results_by_cam["front"]["plate_text"]
-    elif "back" in results_by_cam and results_by_cam["back"].get("plate_text"):
-        final_plate = results_by_cam["back"]["plate_text"]
-    elif found_plates:
-        final_plate = found_plates[0]
+    else:
+        # Collect candidates from all cameras
+        all_candidates = []
+        for c in ["front", "back", "left", "right"]:
+            if c in results_by_cam and results_by_cam[c].get("plate_text"):
+                pt = results_by_cam[c]["plate_text"].strip().upper()
+                if pt and pt != "UNKNOWN":
+                    all_candidates.append(pt)
+
+        full_candidates = [p for p in all_candidates if is_full_plate(p)]
+        if full_candidates:
+            # Pick first full registration (front or rear)
+            final_plate = full_candidates[0]
+        elif len(all_candidates) >= 2:
+            combined_txt = " ".join(all_candidates)
+            comb_parsed, comb_is_full = parse_indian_plate(combined_txt)
+            if comb_is_full and comb_parsed:
+                final_plate = comb_parsed
+            else:
+                all_candidates.sort(key=len, reverse=True)
+                final_plate = all_candidates[0]
+        elif all_candidates:
+            final_plate = all_candidates[0]
 
     # Ensure all 4 camera views are represented (front, back, left, right)
     for cam in ["front", "back", "left", "right"]:
