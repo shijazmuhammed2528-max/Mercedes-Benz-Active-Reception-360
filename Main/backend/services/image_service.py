@@ -30,9 +30,26 @@ def get_image_path(database_dir: str, session_id: str, camera: str,
         logger.warning("Path traversal attempt: %s", folder)
         return None
 
+    # 1. Try explicit path recorded in database row
+    cam_field = f"{camera}_image_path"
+    if cam_field in session and session[cam_field] and os.path.isfile(session[cam_field]):
+        return session[cam_field]
+
+    # 2. Try standard camera filename
     img_path = os.path.join(folder, f"{camera}.jpg")
     if os.path.isfile(img_path):
         return img_path
+
+    # 3. Try any file matching *_{camera}.jpg
+    try:
+        for fname in os.listdir(folder):
+            if fname.lower().endswith(f"_{camera}.jpg"):
+                full_path = os.path.join(folder, fname)
+                if os.path.isfile(full_path):
+                    return full_path
+    except Exception:
+        pass
+
     return None
 
 

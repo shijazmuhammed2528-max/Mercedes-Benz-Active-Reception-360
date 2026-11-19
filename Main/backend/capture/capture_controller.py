@@ -574,27 +574,20 @@ class CaptureController:
             capture_timestamp = now.isoformat()
             session_id = f"session_{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
-            # Attempt OCR on front camera
-            front_cam = self.video_manager.get_camera("front")
-            plate_result = {"text": "", "success": False}
-            if front_cam and front_cam.original_frame is not None:
-                bbox = front_cam.detection["bbox"] if front_cam.detection else None
-                plate_result = recognize_plate(front_cam.original_frame, bbox)
-
-            plate_text = plate_result.get("text", "") if plate_result.get("success") else ""
-            if not plate_text:
-                plate_text = "UNKNOWN"
-            self._plate_text = plate_text
-
             # Create pending staging folder
             from config import DATABASE_DIR
             pending_folder = os.path.join(DATABASE_DIR, "_pending", session_id)
             os.makedirs(pending_folder, exist_ok=True)
 
-            # Capture and save images to pending folder
+            # Ensure OCR is initialized
+            if not is_ocr_available():
+                init_ocr()
+
+            # Capture and save sharpest frames to pending folder
             confidences = {}
             sharpness_scores = {}
             min_sharpness = self.config.get("min_sharpness", 30.0)
+            captured_frames = {}
 
             for name in CAMERA_NAMES:
                 cam = self.video_manager.get_camera(name)
@@ -610,12 +603,41 @@ class CaptureController:
                     sharpness = compute_sharpness(best_frame) if best_frame is not None else 0
 
                 if best_frame is not None:
+                    captured_frames[name] = best_frame
                     img_path = os.path.join(pending_folder, f"{name}.jpg")
                     cv2.imwrite(img_path, best_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
                     logger.info("Pending image saved: %s (sharpness: %.1f)", img_path, sharpness)
 
                 confidences[name] = round(float(cam.confidence or 0.0), 3)
                 sharpness_scores[name] = round(float(sharpness), 1)
+
+            # Automatic Number Plate Identification across all cameras
+            detected_plate = ""
+            best_ocr_conf = 0.0
+
+            # Scan front and back cameras first (standard license plate locations), then left/right
+            for name in ["front", "back", "left", "right"]:
+                frame_to_ocr = captured_frames.get(name)
+                if frame_to_ocr is None:
+                    continue
+
+                cam = self.video_manager.get_camera(name)
+                bbox = cam.detection["bbox"] if (cam and cam.detection and "bbox" in cam.detection) else None
+
+                plate_res = recognize_plate(frame_to_ocr, bbox)
+                if plate_res.get("success") and plate_res.get("text"):
+                    text = plate_res["text"].strip().upper()
+                    conf = float(plate_res.get("confidence", 0.0))
+                    # Prioritize Indian pattern or highest OCR confidence
+                    if conf > best_ocr_conf or not detected_plate:
+                        detected_plate = text
+                        best_ocr_conf = conf
+                        logger.info("Auto-identified license plate from %s: %s (conf: %.2f)", name, text, conf)
+                        if conf >= 0.55:
+                            break
+
+            plate_text = detected_plate if detected_plate else "UNKNOWN"
+            self._plate_text = plate_text
 
             # Store pending capture metadata awaiting confirmation
             self._pending_capture = {
@@ -666,16 +688,26 @@ class CaptureController:
             final_folder_path = os.path.join(DATABASE_DIR, folder_name)
             os.makedirs(final_folder_path, exist_ok=True)
 
-            # Copy images from pending staging to permanent folder
+            # Name files with: {numberplate}_{date}_{time}_{camera}.jpg
+            # (e.g. KL_01_AL_0009_2026-11-20_12-06-31_AM_front.jpg)
+            # and ALSO keep {camera}.jpg for fast API lookup & backward compatibility
             import shutil
+            image_paths = {}
+            saved_filenames = {}
             for name in CAMERA_NAMES:
                 src_img = os.path.join(pending_folder, f"{name}.jpg")
-                dst_img = os.path.join(final_folder_path, f"{name}.jpg")
+                named_filename = f"{plate_norm}_{p['capture_date']}_{time_part}_{name}.jpg"
+                dst_named = os.path.join(final_folder_path, named_filename)
+                dst_standard = os.path.join(final_folder_path, f"{name}.jpg")
+
                 if os.path.isfile(src_img):
                     try:
-                        shutil.copy2(src_img, dst_img)
+                        shutil.copy2(src_img, dst_named)
+                        shutil.copy2(src_img, dst_standard)
+                        image_paths[name] = dst_named
+                        saved_filenames[name] = named_filename
                     except Exception as e:
-                        logger.error("Failed copying %s to %s: %s", src_img, dst_img, e)
+                        logger.error("Failed copying %s to %s: %s", src_img, dst_named, e)
 
             # Save metadata.json
             metadata = {
@@ -687,14 +719,16 @@ class CaptureController:
                 "session_id": p["session_id"],
                 "camera_count": 4,
                 "capture_status": "success",
-                "images": {name: f"{name}.jpg" for name in CAMERA_NAMES},
+                "folder_name": folder_name,
+                "images": saved_filenames,
+                "standard_images": {name: f"{name}.jpg" for name in CAMERA_NAMES},
                 "detection_confidence": p["confidences"],
             }
             meta_path = os.path.join(final_folder_path, "metadata.json")
             with open(meta_path, "w") as f:
                 json.dump(metadata, f, indent=2)
 
-            # Insert into database
+            # Insert into database with the descriptive file paths
             db_data = {
                 "session_id": p["session_id"],
                 "vehicle_number": plate_text,
@@ -703,10 +737,10 @@ class CaptureController:
                 "capture_timestamp": p["capture_timestamp"],
                 "capture_time_12h": p["capture_time_12h"],
                 "folder_path": final_folder_path,
-                "front_image_path": os.path.join(final_folder_path, "front.jpg"),
-                "back_image_path": os.path.join(final_folder_path, "back.jpg"),
-                "left_image_path": os.path.join(final_folder_path, "left.jpg"),
-                "right_image_path": os.path.join(final_folder_path, "right.jpg"),
+                "front_image_path": image_paths.get("front", os.path.join(final_folder_path, "front.jpg")),
+                "back_image_path": image_paths.get("back", os.path.join(final_folder_path, "back.jpg")),
+                "left_image_path": image_paths.get("left", os.path.join(final_folder_path, "left.jpg")),
+                "right_image_path": image_paths.get("right", os.path.join(final_folder_path, "right.jpg")),
                 "front_confidence": p["confidences"].get("front", 0),
                 "back_confidence": p["confidences"].get("back", 0),
                 "left_confidence": p["confidences"].get("left", 0),

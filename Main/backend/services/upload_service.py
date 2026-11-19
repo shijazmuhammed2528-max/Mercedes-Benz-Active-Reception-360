@@ -430,15 +430,22 @@ def confirm_upload_media(
     final_folder = os.path.join(database_dir, folder_name)
     os.makedirs(final_folder, exist_ok=True)
 
-    # Copy 4 images from pending to final folder
+    # Copy 4 images from pending to final folder with descriptive filenames
+    image_paths = {}
+    saved_files = {}
     for cam in ["front", "back", "left", "right"]:
         src = os.path.join(pending_folder, f"{cam}.jpg")
-        dst = os.path.join(final_folder, f"{cam}.jpg")
+        named_filename = f"{norm_plate}_{capture_date}_{time_tag}_{cam}.jpg"
+        dst_named = os.path.join(final_folder, named_filename)
+        dst_standard = os.path.join(final_folder, f"{cam}.jpg")
         if os.path.isfile(src):
             try:
-                shutil.copy2(src, dst)
+                shutil.copy2(src, dst_named)
+                shutil.copy2(src, dst_standard)
+                image_paths[cam] = dst_named
+                saved_files[cam] = named_filename
             except Exception as e:
-                logger.error("Error copying %s to %s: %s", src, dst, e)
+                logger.error("Error copying %s to %s: %s", src, dst_named, e)
 
     # Save final metadata.json
     metadata = {
@@ -450,7 +457,8 @@ def confirm_upload_media(
         "capture_time_12h": capture_time_12h,
         "source": "multi_file_browser_upload",
         "detection_confidences": confidences,
-        "files": {
+        "files": saved_files,
+        "standard_files": {
             "front": os.path.join(final_folder, "front.jpg"),
             "back": os.path.join(final_folder, "back.jpg"),
             "left": os.path.join(final_folder, "left.jpg"),
@@ -469,10 +477,10 @@ def confirm_upload_media(
         "capture_timestamp": capture_timestamp,
         "capture_time_12h": capture_time_12h,
         "folder_path": final_folder,
-        "front_image_path": os.path.join(final_folder, "front.jpg"),
-        "back_image_path": os.path.join(final_folder, "back.jpg"),
-        "left_image_path": os.path.join(final_folder, "left.jpg"),
-        "right_image_path": os.path.join(final_folder, "right.jpg"),
+        "front_image_path": image_paths.get("front", os.path.join(final_folder, "front.jpg")),
+        "back_image_path": image_paths.get("back", os.path.join(final_folder, "back.jpg")),
+        "left_image_path": image_paths.get("left", os.path.join(final_folder, "left.jpg")),
+        "right_image_path": image_paths.get("right", os.path.join(final_folder, "right.jpg")),
         "front_confidence": confidences.get("front", 0.85),
         "back_confidence": confidences.get("back", 0.85),
         "left_confidence": confidences.get("left", 0.85),
