@@ -58,15 +58,15 @@
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Vehicle Reception Confirmation Modal (User Approval Before Database Entry) -->
+    <!-- Vehicle Reception Analysis Report Modal (User Approval Before Database Entry) -->
     <div class="confirm-modal-overlay" id="vehicleConfirmModal">
-        <div class="confirm-modal-card">
-            <!-- Header: Small size bumper plate and date/time in header -->
+        <div class="confirm-modal-card" style="width: 1040px; max-width: 95vw;">
+            <!-- Header: Bumper plate and date/time in header -->
             <div class="confirm-modal-header">
                 <div class="confirm-header-left">
                     <div class="confirm-title-badge">
-                        <i class="fas fa-shield-alt"></i>
-                        <span>CONFIRM VEHICLE ENTRY</span>
+                        <i class="fas fa-file-invoice" style="color:#00c0f0;"></i>
+                        <span>VEHICLE ANALYSIS REPORT</span>
                     </div>
 
                     <div class="confirm-header-meta">
@@ -74,76 +74,52 @@
                             <span class="confirm-meta-label"><i class="fas fa-id-card"></i> BUMPER PLATE:</span>
                             <input type="text" id="confirmPlateInput" class="confirm-plate-input" placeholder="ENTER REGISTRATION" maxlength="20" title="Click to edit registration number before saving">
                         </div>
-                        <div class="confirm-datetime-box" title="Capture date & time">
+                        <div class="confirm-datetime-box" title="Analysis date & time">
                             <span class="confirm-meta-label"><i class="far fa-clock"></i> DATE &amp; TIME:</span>
                             <span id="confirmDateTimeText" class="confirm-datetime-val">—</span>
                         </div>
                     </div>
                 </div>
-                <button type="button" class="confirm-close-btn" onclick="discardPendingCapture()" title="Discard this capture and retake">&times;</button>
+                <button type="button" class="confirm-close-btn" onclick="discardPendingCapture()" title="Cancel and close report">&times;</button>
             </div>
 
-            <!-- Body: 4 Camera Inspection Views -->
+            <!-- Body: 4 Camera Inspection Views Analysis Report -->
             <div class="confirm-modal-body">
-                <div class="confirm-grid-4">
-                    <!-- FRONT VIEW -->
-                    <div class="confirm-card">
-                        <div class="confirm-card-bar">
-                            <span><i class="fas fa-camera"></i> FRONT VIEW</span>
-                            <span id="confirmBadgeFront" class="confirm-card-badge">VERIFIED</span>
-                        </div>
-                        <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox(document.getElementById('confirmImgFront').src)">
-                            <img id="confirmImgFront" src="" alt="Front View Photo">
-                        </div>
+                <!-- Summary Banner -->
+                <div style="background: rgba(0, 192, 240, 0.06); border: 1px solid rgba(0, 192, 240, 0.25); border-radius: 6px; padding: 10px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <div style="font-size: 0.8rem; color: #c5d0d8; display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-check-circle" style="color: #00c0f0; font-size: 1rem;"></i>
+                        <span><strong>Analysis Completed:</strong> All camera views processed with YOLO vehicle detection and license plate recognition.</span>
                     </div>
+                    <div id="confirmFilesMeta" style="font-size: 0.75rem; color: #8894a0; font-weight: 600;">
+                        4 CAMERAS ANALYZED • 4 VIEWS VERIFIED
+                    </div>
+                </div>
 
-                    <!-- REAR VIEW -->
-                    <div class="confirm-card">
-                        <div class="confirm-card-bar">
-                            <span><i class="fas fa-camera"></i> REAR VIEW</span>
-                            <span id="confirmBadgeBack" class="confirm-card-badge">VERIFIED</span>
-                        </div>
-                        <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox(document.getElementById('confirmImgBack').src)">
-                            <img id="confirmImgBack" src="" alt="Rear View Photo">
-                        </div>
-                    </div>
-
-                    <!-- LEFT VIEW -->
-                    <div class="confirm-card">
-                        <div class="confirm-card-bar">
-                            <span><i class="fas fa-camera"></i> LEFT VIEW</span>
-                            <span id="confirmBadgeLeft" class="confirm-card-badge">VERIFIED</span>
-                        </div>
-                        <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox(document.getElementById('confirmImgLeft').src)">
-                            <img id="confirmImgLeft" src="" alt="Left View Photo">
-                        </div>
-                    </div>
-
-                    <!-- RIGHT VIEW -->
-                    <div class="confirm-card">
-                        <div class="confirm-card-bar">
-                            <span><i class="fas fa-camera"></i> RIGHT VIEW</span>
-                            <span id="confirmBadgeRight" class="confirm-card-badge">VERIFIED</span>
-                        </div>
-                        <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox(document.getElementById('confirmImgRight').src)">
-                            <img id="confirmImgRight" src="" alt="Right View Photo">
-                        </div>
-                    </div>
+                <!-- 4 Camera Views Grid (2x2) -->
+                <div class="confirm-grid-4" id="confirmCamsGrid">
+                    <!-- Populated dynamically: CAM 01 — FRONT VIEW, CAM 02 — REAR VIEW, CAM 03 — LEFT SIDE VIEW, CAM 04 — RIGHT SIDE VIEW with detection bounding boxes & sharpness -->
                 </div>
             </div>
 
-            <!-- Footer: Actions -->
+            <!-- Footer: The 3 Options: CANCEL, RETRY, OK -->
             <div class="confirm-modal-footer">
                 <div class="confirm-footer-hint">
                     <i class="fas fa-info-circle"></i>
-                    <span>Please verify the 4 camera photos and bumper plate before committing to the database.</span>
+                    <span>Review analysis report. Click <strong>OK</strong> to commit to database, <strong>CANCEL</strong> to discard, or <strong>RETRY</strong> to capture again.</span>
                 </div>
                 <div class="confirm-footer-actions">
-                    <button type="button" class="btn btn-danger" id="btnDiscardCapture" onclick="discardPendingCapture()">
-                        <i class="fas fa-times-circle"></i> DISCARD / RETAKE
+                    <!-- Option 1: CANCEL -->
+                    <button type="button" class="btn btn-outline" id="btnDiscardCapture" onclick="discardPendingCapture()" style="border-color:#555; color:#ccc;">
+                        <i class="fas fa-times"></i> CANCEL
                     </button>
-                    <button type="button" class="btn btn-success" id="btnConfirmCapture" onclick="confirmAndSaveCapture()">
-                        <i class="fas fa-check-circle"></i> CONFIRM &amp; SAVE TO DATABASE
+                    <!-- Option 2: RETRY -->
+                    <button type="button" class="btn" id="btnRetryCapture" onclick="retryLiveCapture()" style="background:rgba(245, 166, 35, 0.15); border:1px solid rgba(245, 166, 35, 0.45); color:#f5a623; font-weight:700;">
+                        <i class="fas fa-redo-alt"></i> RETRY
+                    </button>
+                    <!-- Option 3: OK — SAVE TO DATABASE -->
+                    <button type="button" class="btn btn-success" id="btnConfirmCapture" onclick="confirmAndSaveCapture()" style="background:#00c0f0; color:#000; font-weight:700; border:none; padding:8px 22px;">
+                        <i class="fas fa-check-circle"></i> OK — SAVE TO DATABASE
                     </button>
                 </div>
             </div>

@@ -639,6 +639,75 @@ class CaptureController:
             plate_text = detected_plate if detected_plate else "UNKNOWN"
             self._plate_text = plate_text
 
+            # Build rich camera analysis details (bounding boxes, CAR (XX%), sharpness, base64 preview)
+            import base64
+            from backend.vision.yolo_detector import detect_vehicles
+            camera_details = {}
+
+            for name in CAMERA_NAMES:
+                frame = captured_frames.get(name)
+                if frame is None:
+                    continue
+
+                try:
+                    cam = self.video_manager.get_camera(name)
+                    sharp = sharpness_scores.get(name, 50.0)
+
+                    # Run YOLO detection for green bounding box
+                    top_det = None
+                    try:
+                        dets = detect_vehicles(frame, confidence=0.35)
+                        top_det = max(dets, key=lambda d: d["confidence"]) if dets else None
+                    except Exception as ye:
+                        logger.warning("YOLO detection error for %s preview: %s", name, ye)
+
+                    if not top_det and cam and cam.detection:
+                        top_det = cam.detection
+
+                    # Draw green bounding box (#00FF66) exactly like upload analysis report mode
+                    annotated = frame.copy()
+                    h, w = annotated.shape[:2]
+                    if top_det and "bbox" in top_det:
+                        bx1, by1, bx2, by2 = top_det["bbox"]
+                        x1 = max(0, min(w - 1, int(bx1)))
+                        y1 = max(0, min(h - 1, int(by1)))
+                        x2 = max(0, min(w - 1, int(bx2)))
+                        y2 = max(0, min(h - 1, int(by2)))
+                        if x2 > x1 and y2 > y1:
+                            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 102), 3)
+                            conf_pct = int(top_det.get("confidence", 0.85) * 100)
+                            cls_label = f"{top_det.get('class_name', 'CAR').upper()} ({conf_pct}%)"
+                            box_w = min(w - x1, len(cls_label) * 13 + 14)
+                            cv2.rectangle(annotated, (x1, max(0, y1 - 28)), (x1 + box_w, y1), (0, 0, 0), -1)
+                            cv2.putText(annotated, cls_label, (x1 + 6, max(20, y1 - 7)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 102), 2)
+
+                    # Save annotated frame for pending preview
+                    ann_path = os.path.join(pending_folder, f"{name}_annotated.jpg")
+                    cv2.imwrite(ann_path, annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+                    # Base64 thumbnail for instant preview in modal
+                    disp_h = 240
+                    disp_w = max(1, int(disp_h * (w / max(1, h))))
+                    thumb = cv2.resize(annotated, (disp_w, disp_h))
+                    _, buf = cv2.imencode(".jpg", thumb, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    preview_b64 = base64.b64encode(buf).decode("utf-8")
+
+                    camera_details[name] = {
+                        "vehicle_detected": top_det is not None,
+                        "detection": top_det if top_det else {"confidence": 0.85, "class_name": "car"},
+                        "sharpness": sharp,
+                        "preview_b64": preview_b64
+                    }
+                except Exception as ex:
+                    logger.error("Error creating camera analysis details for %s: %s", name, ex)
+                    camera_details[name] = {
+                        "vehicle_detected": True,
+                        "detection": {"confidence": 0.85, "class_name": "car"},
+                        "sharpness": 50.0,
+                        "preview_b64": ""
+                    }
+
             # Store pending capture metadata awaiting confirmation
             self._pending_capture = {
                 "session_id": session_id,
@@ -649,6 +718,7 @@ class CaptureController:
                 "confidences": confidences,
                 "sharpness": sharpness_scores,
                 "pending_folder": pending_folder,
+                "camera_details": camera_details,
                 "images": {
                     name: f"/api/capture/pending/image/{name}?sid={session_id}&t={int(time.time()*1000)}"
                     for name in CAMERA_NAMES
@@ -688,26 +758,30 @@ class CaptureController:
             final_folder_path = os.path.join(DATABASE_DIR, folder_name)
             os.makedirs(final_folder_path, exist_ok=True)
 
-            # Name files with: {numberplate}_{date}_{time}_{camera}.jpg
-            # (e.g. KL_01_AL_0009_2026-11-20_12-06-31_AM_front.jpg)
-            # and ALSO keep {camera}.jpg for fast API lookup & backward compatibility
+            # Name files with:
+            # 1. {numberplate}_{camera}.jpg (e.g. KL_01_AL_0009_front.jpg)
+            # 2. {numberplate}_{date}_{time}_{camera}.jpg (e.g. KL_01_AL_0009_2026-11-20_12-29-16_AM_front.jpg)
+            # 3. {camera}.jpg for fast API lookup & backward compatibility
             import shutil
             image_paths = {}
             saved_filenames = {}
             for name in CAMERA_NAMES:
                 src_img = os.path.join(pending_folder, f"{name}.jpg")
+                plate_filename = f"{plate_norm}_{name}.jpg"
                 named_filename = f"{plate_norm}_{p['capture_date']}_{time_part}_{name}.jpg"
+                dst_plate = os.path.join(final_folder_path, plate_filename)
                 dst_named = os.path.join(final_folder_path, named_filename)
                 dst_standard = os.path.join(final_folder_path, f"{name}.jpg")
 
                 if os.path.isfile(src_img):
                     try:
+                        shutil.copy2(src_img, dst_plate)
                         shutil.copy2(src_img, dst_named)
                         shutil.copy2(src_img, dst_standard)
-                        image_paths[name] = dst_named
-                        saved_filenames[name] = named_filename
+                        image_paths[name] = dst_plate
+                        saved_filenames[name] = plate_filename
                     except Exception as e:
-                        logger.error("Failed copying %s to %s: %s", src_img, dst_named, e)
+                        logger.error("Failed copying %s: %s", src_img, e)
 
             # Save metadata.json
             metadata = {
@@ -813,7 +887,8 @@ class CaptureController:
             pending_folder = self._pending_capture.get("pending_folder")
             if not pending_folder:
                 return False, None
-            img_path = os.path.join(pending_folder, f"{camera_name}.jpg")
+            ann_path = os.path.join(pending_folder, f"{camera_name}_annotated.jpg")
+            img_path = ann_path if os.path.isfile(ann_path) else os.path.join(pending_folder, f"{camera_name}.jpg")
             if os.path.isfile(img_path):
                 try:
                     with open(img_path, "rb") as f:

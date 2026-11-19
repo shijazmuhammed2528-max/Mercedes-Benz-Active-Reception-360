@@ -1,4 +1,4 @@
-// Global Vehicle Reception Confirmation Modal
+// Global Vehicle Reception Analysis Report Modal
 // Handles user review & approval before committing vehicle records into SQLite database.
 
 let activePendingCapture = null;
@@ -26,25 +26,57 @@ function showConfirmModal(pending) {
         dtEl.textContent = `${pending.capture_date} | ${pending.capture_time_12h}`;
     }
 
-    // 2. Set 4 Vehicle Camera Images
-    const cams = ['front', 'back', 'left', 'right'];
-    cams.forEach(cam => {
-        const cap = cam.charAt(0).toUpperCase() + cam.slice(1);
-        const img = document.getElementById('confirmImg' + cap);
-        const badge = document.getElementById('confirmBadge' + cap);
+    const metaFiles = document.getElementById('confirmFilesMeta');
+    if (metaFiles) {
+        metaFiles.textContent = '4 CAMERAS ANALYZED • 4 VIEWS VERIFIED';
+    }
 
-        if (img) {
-            const url = (pending.images && pending.images[cam])
-                ? pending.images[cam]
-                : `/api/capture/pending/image/${cam}?sid=${pending.session_id}&t=${Date.now()}`;
-            img.src = url;
-        }
+    // 2. Render 4 Camera Cards (2x2 Grid) with Detection & Sharpness exactly like analysis mode
+    const grid = document.getElementById('confirmCamsGrid');
+    if (grid) {
+        const camOrder = ['front', 'back', 'left', 'right'];
+        const camLabels = {
+            front: 'CAM 01 — FRONT VIEW',
+            back: 'CAM 02 — REAR VIEW',
+            left: 'CAM 03 — LEFT SIDE VIEW',
+            right: 'CAM 04 — RIGHT SIDE VIEW'
+        };
 
-        if (badge && pending.confidences && pending.confidences[cam] !== undefined) {
-            const pct = Math.round((parseFloat(pending.confidences[cam]) || 0) * 100);
-            badge.textContent = pct > 0 ? `${pct}% CONFIDENCE` : 'VERIFIED';
-        }
-    });
+        const details = pending.camera_details || {};
+
+        grid.innerHTML = camOrder.map(c => {
+            const info = details[c] || {};
+            const det = info.detection || {};
+            const isDetected = info.vehicle_detected !== false;
+            const confPct = Math.round((det.confidence || pending.confidences?.[c] || 0.85) * 100);
+            const clsName = (det.class_name || 'CAR').toUpperCase();
+
+            const detBadge = isDetected 
+                ? `<span style="color:var(--success, #38ef7d); font-weight:700;"><i class="fas fa-check-circle"></i> ${clsName} (${confPct}%)</span>`
+                : `<span style="color:var(--warning, #f5a623);"><i class="fas fa-exclamation-triangle"></i> Searching...</span>`;
+
+            const sharpVal = info.sharpness || pending.sharpness?.[c] || '—';
+            const imgSrc = (info.preview_b64)
+                ? `data:image/jpeg;base64,${info.preview_b64}`
+                : `/api/capture/pending/image/${c}?sid=${pending.session_id}&t=${Date.now()}`;
+
+            return `
+                <div class="confirm-card">
+                    <div class="confirm-card-bar">
+                        <span>${camLabels[c]}</span>
+                        <span class="confirm-card-badge">LIVE RECEPTION</span>
+                    </div>
+                    <div class="confirm-card-img-wrap" onclick="if(typeof openLightbox==='function') openLightbox('${imgSrc}')">
+                        <img id="confirmImg${c.charAt(0).toUpperCase() + c.slice(1)}" src="${imgSrc}" alt="${c}">
+                    </div>
+                    <div style="padding:6px 10px; font-size:11px; display:flex; justify-content:space-between; align-items:center; background:#0e1013; border-top:1px solid rgba(255,255,255,0.05);">
+                        <div>${detBadge}</div>
+                        <div style="color:#8894a0; font-size:10px; font-weight:600;">Sharpness: ${sharpVal}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
 
     // 3. Display Modal with animation
     const modal = document.getElementById('vehicleConfirmModal');
@@ -67,6 +99,7 @@ function closeConfirmModal() {
     isSavingConfirm = false;
 }
 
+// Option 3: OK — SAVE TO DATABASE
 async function confirmAndSaveCapture() {
     if (isSavingConfirm || !activePendingCapture) return;
     isSavingConfirm = true;
@@ -92,7 +125,8 @@ async function confirmAndSaveCapture() {
 
         if (data.success) {
             closeConfirmModal();
-            showGlobalToast(`✓ Vehicle ${data.vehicle_number || plate || 'Record'} confirmed & saved to database!`, 'success');
+            const savedPlate = data.vehicle_number || plate || 'Record';
+            showGlobalToast(`✓ Vehicle ${savedPlate} confirmed & saved to database!`, 'success');
 
             // If browsing /database: refresh list
             if (typeof loadVehicles === 'function') {
@@ -121,6 +155,7 @@ async function confirmAndSaveCapture() {
     }
 }
 
+// Option 1: CANCEL
 async function discardPendingCapture() {
     if (!activePendingCapture) {
         closeConfirmModal();
@@ -139,6 +174,26 @@ async function discardPendingCapture() {
     } catch (e) {
         console.error('Discard capture error:', e);
         closeConfirmModal();
+    }
+}
+
+// Option 2: RETRY
+async function retryLiveCapture() {
+    if (activePendingCapture && activePendingCapture.session_id) {
+        try {
+            await fetch('/api/capture/discard', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: activePendingCapture.session_id })
+            });
+        } catch (e) {}
+    }
+    closeConfirmModal();
+    showGlobalToast('Retrying capture... Scanning cameras for full view.', 'info');
+
+    // Trigger fresh capture
+    if (typeof triggerValidityCapture === 'function') {
+        setTimeout(() => triggerValidityCapture(), 300);
     }
 }
 

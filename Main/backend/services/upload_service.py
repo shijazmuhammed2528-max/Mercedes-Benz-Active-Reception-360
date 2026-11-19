@@ -435,15 +435,18 @@ def confirm_upload_media(
     saved_files = {}
     for cam in ["front", "back", "left", "right"]:
         src = os.path.join(pending_folder, f"{cam}.jpg")
+        plate_filename = f"{norm_plate}_{cam}.jpg"
         named_filename = f"{norm_plate}_{capture_date}_{time_tag}_{cam}.jpg"
+        dst_plate = os.path.join(final_folder, plate_filename)
         dst_named = os.path.join(final_folder, named_filename)
         dst_standard = os.path.join(final_folder, f"{cam}.jpg")
         if os.path.isfile(src):
             try:
+                shutil.copy2(src, dst_plate)
                 shutil.copy2(src, dst_named)
                 shutil.copy2(src, dst_standard)
-                image_paths[cam] = dst_named
-                saved_files[cam] = named_filename
+                image_paths[cam] = dst_plate
+                saved_files[cam] = plate_filename
             except Exception as e:
                 logger.error("Error copying %s to %s: %s", src, dst_named, e)
 
