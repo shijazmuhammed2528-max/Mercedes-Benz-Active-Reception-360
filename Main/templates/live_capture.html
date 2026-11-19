@@ -44,6 +44,9 @@
             <span class="power-dot"></span>
             <span id="powerText">CAMERAS OFF (STANDBY)</span>
         </div>
+        <button class="btn-scan-cams" id="btnAddWifiCamBtn" onclick="openWifiModal()" title="Add WiFi or IP Camera (RTSP / HTTP stream)" style="background: rgba(0, 192, 240, 0.12); border-color: rgba(0, 192, 240, 0.4); color: #00c0f0;">
+            <i class="fas fa-wifi"></i> + ADD WIFI CAM
+        </button>
         <button class="btn-scan-cams" id="btnRescanCams" onclick="rescanConnectedCameras()" title="Scan for newly plugged USB cameras">
             <i class="fas fa-sync-alt" id="scanIcon"></i> SCAN USB CAMERAS
         </button>
@@ -260,8 +263,38 @@
         </a>
     </div>
 </div>
+
+<!-- WiFi / IP Camera Modal -->
+<div id="wifiModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(4px); z-index:99999; justify-content:center; align-items:center;">
+    <div style="background:#15181b; border:1px solid rgba(0,192,240,0.4); border-radius:8px; padding:24px 28px; width:480px; max-width:90vw; box-shadow:0 12px 36px rgba(0,0,0,0.8);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h3 style="margin:0; font-size:1.1rem; color:#fff; display:flex; align-items:center; gap:8px;">
+                <i class="fas fa-wifi" style="color:#00c0f0;"></i> Add WiFi / Network IP Camera
+            </h3>
+            <button onclick="closeWifiModal()" style="background:none; border:none; color:#888; font-size:1.4rem; cursor:pointer; line-height:1;">&times;</button>
+        </div>
+        <p style="font-size:0.85rem; color:#a0aab2; margin-bottom:18px; line-height:1.4;">
+            Connect any RTSP or HTTP camera stream (e.g. DroidCam, IP Webcam app, phone camera over WiFi, security camera, or ESP32-CAM).
+        </p>
+        <div style="margin-bottom:14px;">
+            <label style="display:block; font-size:0.8rem; font-weight:600; color:#c5d0d8; margin-bottom:6px; letter-spacing:0.5px;">CAMERA NAME</label>
+            <input type="text" id="wifiCamName" placeholder="e.g. Workshop Cam / Phone Front" style="width:100%; padding:9px 12px; background:#0d0f11; border:1px solid #333a42; border-radius:4px; color:#fff; font-size:0.9rem; outline:none;" onfocus="this.style.borderColor='#00c0f0'" onblur="this.style.borderColor='#333a42'">
+        </div>
+        <div style="margin-bottom:20px;">
+            <label style="display:block; font-size:0.8rem; font-weight:600; color:#c5d0d8; margin-bottom:6px; letter-spacing:0.5px;">STREAM URL (RTSP / HTTP / HTTPS)</label>
+            <input type="text" id="wifiCamUrl" placeholder="e.g. http://192.168.1.50:8080/video or rtsp://..." style="width:100%; padding:9px 12px; background:#0d0f11; border:1px solid #333a42; border-radius:4px; color:#fff; font-size:0.9rem; outline:none;" onfocus="this.style.borderColor='#00c0f0'" onblur="this.style.borderColor='#333a42'">
+            <div style="font-size:0.75rem; color:#6b7682; margin-top:5px;">Examples: <code>http://192.168.1.100:8080/video</code> (IP Webcam) or <code>rtsp://admin:pass@192.168.1.200:554/stream1</code></div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+            <button onclick="closeWifiModal()" class="btn" style="background:#222; border:1px solid #444; color:#ccc; padding:8px 16px; border-radius:4px; cursor:pointer;">Cancel</button>
+            <button onclick="submitAddWifiCam()" class="btn btn-primary" style="background:#00c0f0; color:#000; font-weight:700; border:none; padding:8px 20px; border-radius:4px; cursor:pointer;">
+                <i class="fas fa-plus"></i> Add &amp; Connect Camera
+            </button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/capture.js?v=3.1"></script>
+<script src="/static/js/capture.js?v=3.2"></script>
 {% endblock %}

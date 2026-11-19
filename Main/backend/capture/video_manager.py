@@ -26,6 +26,7 @@ class HardwareDeviceManager:
     def __init__(self):
         self._devices = {}  # dev_idx -> cv2.VideoCapture
         self._latest_frames = {}  # dev_idx -> np.ndarray
+        self._latest_frame_times = {}  # dev_idx -> float timestamp
         self._dev_locks = {}
         self._resolutions = {}
 
@@ -36,71 +37,111 @@ class HardwareDeviceManager:
                 cls._instance = HardwareDeviceManager()
             return cls._instance
 
-    def open_device(self, dev_idx: int) -> bool:
+    def open_device(self, source: int | str) -> bool:
         with self._lock:
-            if dev_idx in self._devices and self._devices[dev_idx] is not None and self._devices[dev_idx].isOpened():
+            # Normalize key
+            if isinstance(source, str) and source.strip().isdigit():
+                dev_key = int(source.strip())
+            else:
+                dev_key = source
+
+            if dev_key in self._devices and self._devices[dev_key] is not None and self._devices[dev_key].isOpened():
                 return True
 
-            backend = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
-            try:
-                cap = cv2.VideoCapture(dev_idx, backend)
-                if cap is not None and cap.isOpened():
-                    ret, frame = cap.read()
-                    if ret and frame is not None:
-                        self._devices[dev_idx] = cap
-                        self._latest_frames[dev_idx] = frame.copy()
-                        self._dev_locks[dev_idx] = threading.Lock()
-                        self._resolutions[dev_idx] = (frame.shape[1], frame.shape[0])
-                        logger.info("HardwareDeviceManager: Successfully opened Camera %d (%dx%d)",
-                                    dev_idx, frame.shape[1], frame.shape[0])
-                        return True
-                    else:
-                        cap.release()
-            except Exception as e:
-                logger.warning("HardwareDeviceManager: Error probing Camera %d: %s", dev_idx, e)
+            is_wifi = isinstance(dev_key, str) and any(dev_key.lower().startswith(p) for p in ("http://", "https://", "rtsp://", "rtmp://"))
 
-            logger.info("HardwareDeviceManager: Camera %d is not connected", dev_idx)
+            try:
+                if is_wifi:
+                    cap = cv2.VideoCapture(str(dev_key))
+                    if cap is not None and cap.isOpened():
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        ret, frame = cap.read()
+                        if ret and frame is not None:
+                            self._devices[dev_key] = cap
+                            self._latest_frames[dev_key] = frame.copy()
+                            self._dev_locks[dev_key] = threading.Lock()
+                            self._resolutions[dev_key] = (frame.shape[1], frame.shape[0])
+                            logger.info("HardwareDeviceManager: Successfully opened WiFi/IP Camera %s (%dx%d)",
+                                        dev_key, frame.shape[1], frame.shape[0])
+                            return True
+                        else:
+                            cap.release()
+                else:
+                    backend = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
+                    cap = cv2.VideoCapture(int(dev_key), backend)
+                    if cap is not None and cap.isOpened():
+                        # Set zero-latency buffer and 30 FPS target
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        cap.set(cv2.CAP_PROP_FPS, 30.0)
+                        ret, frame = cap.read()
+                        if ret and frame is not None:
+                            self._devices[dev_key] = cap
+                            self._latest_frames[dev_key] = frame.copy()
+                            self._dev_locks[dev_key] = threading.Lock()
+                            self._resolutions[dev_key] = (frame.shape[1], frame.shape[0])
+                            logger.info("HardwareDeviceManager: Successfully opened Camera %s (%dx%d at 30fps)",
+                                        dev_key, frame.shape[1], frame.shape[0])
+                            return True
+                        else:
+                            cap.release()
+            except Exception as e:
+                logger.warning("HardwareDeviceManager: Error probing Camera %s: %s", dev_key, e)
+
+            logger.info("HardwareDeviceManager: Camera %s is not connected", dev_key)
             return False
 
-    def is_device_open(self, dev_idx: int) -> bool:
+    def is_device_open(self, dev_idx: int | str) -> bool:
         with self._lock:
-            return dev_idx in self._devices and self._devices[dev_idx].isOpened()
+            key = int(dev_idx) if str(dev_idx).isdigit() else dev_idx
+            return key in self._devices and self._devices[key].isOpened()
 
-    def read_frame(self, dev_idx: int) -> tuple[bool, np.ndarray | None]:
+    def read_frame(self, dev_idx: int | str) -> tuple[bool, np.ndarray | None]:
         with self._lock:
-            cap = self._devices.get(dev_idx)
+            key = int(dev_idx) if str(dev_idx).isdigit() else dev_idx
+            cap = self._devices.get(key)
             if cap is None or not cap.isOpened():
                 return False, None
-            d_lock = self._dev_locks.get(dev_idx)
+            d_lock = self._dev_locks.get(key)
+            now = time.time()
+            # If this hardware device was read within 18ms (e.g. sharing across multiple visual boxes),
+            # return cached frame immediately to prevent DirectShow blocking or multi-tick frame drops!
+            if (now - self._latest_frame_times.get(key, 0.0)) < 0.018 and key in self._latest_frames:
+                return True, self._latest_frames[key]
 
         if d_lock:
             with d_lock:
                 ret, frame = cap.read()
                 if ret and frame is not None:
-                    self._latest_frames[dev_idx] = frame
+                    with self._lock:
+                        self._latest_frames[key] = frame
+                        self._latest_frame_times[key] = time.time()
                     return True, frame
-                return False, self._latest_frames.get(dev_idx)
+                with self._lock:
+                    return False, self._latest_frames.get(key)
         return False, None
 
-    def get_resolution(self, dev_idx: int) -> tuple[int, int]:
+    def get_resolution(self, dev_idx: int | str) -> tuple[int, int]:
         with self._lock:
-            return self._resolutions.get(dev_idx, (640, 480))
+            key = int(dev_idx) if str(dev_idx).isdigit() else dev_idx
+            return self._resolutions.get(key, (640, 480))
 
-    def get_latest_frame(self, dev_idx: int) -> np.ndarray | None:
+    def get_latest_frame(self, dev_idx: int | str) -> np.ndarray | None:
         with self._lock:
-            f = self._latest_frames.get(dev_idx)
+            key = int(dev_idx) if str(dev_idx).isdigit() else dev_idx
+            f = self._latest_frames.get(key)
             return f.copy() if f is not None else None
 
-    def release_device(self, dev_idx: int):
+    def release_device(self, dev_idx: int | str):
         with self._lock:
-            cap = self._devices.pop(dev_idx, None)
+            key = int(dev_idx) if str(dev_idx).isdigit() else dev_idx
+            cap = self._devices.pop(key, None)
             if cap:
                 try:
                     cap.release()
                 except Exception:
                     pass
-            self._latest_frames.pop(dev_idx, None)
-            self._dev_locks.pop(dev_idx, None)
+            self._latest_frames.pop(key, None)
+            self._dev_locks.pop(key, None)
 
     def release_all(self):
         with self._lock:
@@ -153,35 +194,46 @@ class CameraStream:
             return True
         return False
 
+    def _is_wifi_source(self) -> bool:
+        s = str(self.video_path).strip().lower()
+        return any(s.startswith(p) for p in ("http://", "https://", "rtsp://", "rtmp://"))
+
     def _get_device_index(self) -> int:
         if isinstance(self.video_path, int):
             return self.video_path
         return int(str(self.video_path).strip())
 
+    def _get_source_key(self) -> int | str:
+        if self._is_device_source():
+            return self._get_device_index()
+        return str(self.video_path).strip()
+
     def open(self) -> bool:
         with self.lock:
             is_device = self._is_device_source()
-            if is_device:
-                dev_idx = self._get_device_index()
+            is_wifi = self._is_wifi_source()
+
+            if is_device or is_wifi:
+                source_key = self._get_source_key()
                 # Open via shared hardware device manager (no silent fallback to video files!)
-                opened = self.hw_manager.open_device(dev_idx)
+                opened = self.hw_manager.open_device(source_key)
                 self.is_connected = opened
                 self.is_open = True
                 if opened:
-                    w, h = self.hw_manager.get_resolution(dev_idx)
+                    w, h = self.hw_manager.get_resolution(source_key)
                     self.width = w
                     self.height = h
-                    latest = self.hw_manager.get_latest_frame(dev_idx)
+                    latest = self.hw_manager.get_latest_frame(source_key)
                     if latest is not None:
                         self.current_frame = latest.copy()
                         self.original_frame = latest.copy()
-                    logger.info("Screen '%s' connected to physical Camera %d (%dx%d)", self.name, dev_idx, w, h)
+                    logger.info("Screen '%s' connected to physical/network camera '%s' (%dx%d)", self.name, source_key, w, h)
                 else:
                     self.width = 640
                     self.height = 360
                     self.current_frame = self._create_no_signal_frame()
                     self.original_frame = self.current_frame.copy()
-                    logger.info("Screen '%s' assigned to Camera %d (Device not plugged in)", self.name, dev_idx)
+                    logger.info("Screen '%s' assigned to camera '%s' (Device not connected)", self.name, source_key)
                 return True
             else:
                 # Explicit video file (only if user explicitly chose it)
@@ -224,10 +276,20 @@ class CameraStream:
         for x in range(0, 640, 64):
             cv2.line(frame, (x, 0), (x, 360), (25, 25, 25), 1)
 
-        dev_idx = self._get_device_index() if self._is_device_source() else self.video_path
+        if self._is_wifi_source():
+            label_text = f"WIFI CAMERA: NO SIGNAL"
+            sub_text = f"Check WiFi stream: {str(self.video_path)[:32]}"
+        elif self._is_device_source():
+            dev_idx = self._get_device_index()
+            label_text = f"CAMERA {dev_idx}: NO VIDEO SIGNAL"
+            sub_text = f"Connect USB Camera {dev_idx} or select Camera 0 from list"
+        else:
+            label_text = f"{self.label}: NO VIDEO SIGNAL"
+            sub_text = "Select an available live camera from the dropdown"
+
         cv2.putText(frame, self.label, (24, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (220, 220, 220), 2)
-        cv2.putText(frame, f"CAMERA {dev_idx}: NO VIDEO SIGNAL", (110, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 140, 255), 2)
-        cv2.putText(frame, f"Connect USB Camera {dev_idx} or select Camera 0 from list", (115, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (130, 130, 130), 1)
+        cv2.putText(frame, label_text, (110, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 140, 255), 2)
+        cv2.putText(frame, sub_text, (115, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (130, 130, 130), 1)
         # Red disconnected status indicator
         cv2.circle(frame, (640 - 24, 24), 8, (0, 0, 255), -1)
         return frame
@@ -237,10 +299,10 @@ class CameraStream:
             if not self.is_open:
                 return False
 
-            if self._is_device_source():
-                dev_idx = self._get_device_index()
+            if self._is_device_source() or self._is_wifi_source():
+                source_key = self._get_source_key()
                 if self.is_connected:
-                    ret, frame = self.hw_manager.read_frame(dev_idx)
+                    ret, frame = self.hw_manager.read_frame(source_key)
                     if ret and frame is not None:
                         self.original_frame = frame.copy()
                         self.current_frame = frame
@@ -353,6 +415,7 @@ class CameraStream:
 
     def get_status(self) -> dict:
         is_dev = self._is_device_source()
+        is_wifi = self._is_wifi_source()
         return {
             "name": self.name,
             "label": self.label,
@@ -360,7 +423,8 @@ class CameraStream:
             "is_connected": self.is_connected,
             "is_playing": self.is_playing,
             "is_device": is_dev,
-            "file_exists": True if is_dev else os.path.isfile(str(self.video_path)),
+            "is_wifi": is_wifi,
+            "file_exists": True if (is_dev or is_wifi) else os.path.isfile(str(self.video_path)),
             "source": str(self.video_path),
             "frame_number": self.frame_number,
             "total_frames": self.total_frames,

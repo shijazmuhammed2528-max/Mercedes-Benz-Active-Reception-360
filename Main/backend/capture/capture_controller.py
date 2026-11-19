@@ -372,17 +372,17 @@ class CaptureController:
 
     def _processing_loop(self):
         """Main processing loop — runs in background thread."""
-        process_fps = self.config.get("yolo_process_fps", 8)
+        process_fps = self.config.get("yolo_process_fps", 30)
         frame_interval = 1.0 / process_fps
         confidence = self.config.get("yolo_confidence", 0.45)
         vehicle_classes = self.config.get("yolo_vehicle_classes", [2, 3, 5, 7])
         inference_size = self.config.get("yolo_inference_size", 640)
 
-        logger.info("Processing loop started (FPS: %d)", process_fps)
+        logger.info("Processing loop started on RTX 4050 GPU (Target FPS: %d)", process_fps)
 
         while not self._stop_event.is_set():
             loop_start = time.time()
-            process_fps = max(1, int(self.config.get("yolo_process_fps", 8)))
+            process_fps = max(1, int(self.config.get("yolo_process_fps", 30)))
             frame_interval = 1.0 / process_fps
             confidence = float(self.config.get("yolo_confidence", 0.45))
             vehicle_classes = self.config.get("yolo_vehicle_classes", [2, 3, 5, 7])
@@ -407,10 +407,25 @@ class CaptureController:
                     all_read = False
 
             # Run YOLO and update visual display frames for every camera
+            # Group cameras by unique source to avoid duplicate YOLO inferences if multiple screens share the same camera
             any_detected = False
             all_detected = True
             all_view_ok = True
             all_stationary = True
+
+            unique_detections = {}
+            for name in CAMERA_NAMES:
+                cam = self.video_manager.get_camera(name)
+                if cam is None or cam.current_frame is None or not cam.is_open or not cam.is_connected:
+                    continue
+                source_key = cam._get_source_key()
+                if source_key not in unique_detections:
+                    unique_detections[source_key] = detect_vehicles(
+                        cam.current_frame,
+                        confidence=confidence,
+                        vehicle_classes=vehicle_classes,
+                        inference_size=inference_size
+                    )
 
             for name in CAMERA_NAMES:
                 cam = self.video_manager.get_camera(name)
@@ -431,13 +446,9 @@ class CaptureController:
                     self._display_frames[name] = cam.get_display_frame()
                     continue
 
-                # YOLO detection
-                detections = detect_vehicles(
-                    cam.current_frame,
-                    confidence=confidence,
-                    vehicle_classes=vehicle_classes,
-                    inference_size=inference_size
-                )
+                # Retrieve YOLO detection for this camera's hardware/stream source
+                source_key = cam._get_source_key()
+                detections = unique_detections.get(source_key, [])
 
                 if detections:
                     # Take the largest / highest confidence detection

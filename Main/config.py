@@ -40,7 +40,7 @@ YOLO_MODEL = "yolov8n.pt"           # lightweight; change to yolov8s.pt for bett
 YOLO_CONFIDENCE = 0.35
 YOLO_VEHICLE_CLASSES = [2, 3, 5, 7]  # car, motorcycle, bus, truck (COCO IDs)
 YOLO_INFERENCE_SIZE = 640
-YOLO_PROCESS_FPS = 8                 # frames analysed per second per camera
+YOLO_PROCESS_FPS = 30                 # frames analysed per second per camera (RTX 4050 accelerated)
 
 # ─── Capture Configuration ─────────────────────────────────────
 STATIONARY_DURATION = 2.0            # seconds vehicle must be still
@@ -53,7 +53,7 @@ MIN_SHARPNESS = 30.0                # Laplacian variance threshold
 CAPTURE_COOLDOWN = 5.0              # seconds between captures
 
 # ─── Device ────────────────────────────────────────────────────
-DEVICE = "auto"  # "auto" | "cuda" | "cpu"
+DEVICE = "cuda"  # "auto" | "cuda" | "cpu" — optimized for NVIDIA RTX 4050
 
 # ─── Web Server ────────────────────────────────────────────────
 HOST = "127.0.0.1"

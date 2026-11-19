@@ -146,9 +146,13 @@ def api_dashboard_recent():
 
 @app.route("/api/status")
 def api_status():
-    from backend.services.storage_service import check_video_files, get_storage_info
+    from backend.services.storage_service import get_storage_info
+    cam_mapping = controller.get_camera_mapping()
+    cams_status = {}
+    for name, cinfo in cam_mapping.items():
+        cams_status[name] = {"exists": bool(cinfo.get("connected", False) or cinfo.get("is_open", False))}
     return jsonify({
-        "videos": check_video_files(VIDEO_SOURCES),
+        "videos": cams_status,
         "storage": get_storage_info(DATABASE_DIR),
         "yolo_ready": controller._yolo_ready,
         "database": os.path.isfile(DATABASE_FILE),
@@ -240,6 +244,52 @@ def api_cameras_mapping():
         "is_live": controller.is_running
     })
 
+@app.route("/api/cameras/wifi/add", methods=["POST"])
+def api_cameras_wifi_add():
+    """Add a new WiFi / IP camera stream (RTSP/HTTP/HTTPS)."""
+    import time
+    data = request.get_json() or {}
+    url = data.get("url", "").strip()
+    name = data.get("name", "").strip() or "WiFi Camera"
+    if not url:
+        return jsonify({"success": False, "error": "Camera stream URL is required"}), 400
+
+    cfg = load_config()
+    wifi_cams = cfg.get("wifi_cameras", [])
+
+    for cam in wifi_cams:
+        if cam.get("url") == url:
+            return jsonify({"success": True, "already_exists": True, "camera": cam, "wifi_cameras": wifi_cams})
+
+    new_cam = {
+        "id": url,
+        "name": name,
+        "url": url,
+        "connected": True,
+        "is_wifi": True,
+    }
+    wifi_cams.append(new_cam)
+    cfg["wifi_cameras"] = wifi_cams
+    save_config(cfg)
+    logger.info("Added new WiFi / IP camera: %s (%s)", name, url)
+    return jsonify({"success": True, "camera": new_cam, "wifi_cameras": wifi_cams})
+
+@app.route("/api/cameras/wifi/remove", methods=["POST"])
+def api_cameras_wifi_remove():
+    """Remove a configured WiFi / IP camera."""
+    data = request.get_json() or {}
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"success": False, "error": "URL is required"}), 400
+
+    cfg = load_config()
+    wifi_cams = cfg.get("wifi_cameras", [])
+    wifi_cams = [c for c in wifi_cams if c.get("url") != url]
+    cfg["wifi_cameras"] = wifi_cams
+    save_config(cfg)
+    logger.info("Removed WiFi / IP camera: %s", url)
+    return jsonify({"success": True, "wifi_cameras": wifi_cams})
+
 # ═══════════════════════════════════════════════════════════════
 # API — Video Streaming (MJPEG)
 # ═══════════════════════════════════════════════════════════════
@@ -271,7 +321,7 @@ def generate_mjpeg(camera_name: str):
                                b'Content-Type: image/jpeg\r\n'
                                b'Content-Length: ' + str(len(jpeg_bytes)).encode() + b'\r\n\r\n'
                                + jpeg_bytes + b'\r\n')
-                    time.sleep(1.0 / 20)
+                    time.sleep(1.0 / 30)
                     continue
 
             # When cameras are off/standby

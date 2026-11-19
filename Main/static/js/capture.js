@@ -5,6 +5,8 @@ let isSessionActive = false;
 let currentCameraView = 'all';
 let currentCameraMapping = {};
 let availableDevicesList = [];
+let wifiCamerasList = [];
+let pendingWifiScreenTarget = null;
 
 const CAMERAS = ['front', 'back', 'left', 'right'];
 const CAM_LABELS = {
@@ -18,19 +20,24 @@ async function loadAvailableCameras(forceRefresh = false) {
         const res = await fetch(`/api/cameras/available?refresh=${forceRefresh ? 'true' : 'false'}`);
         const data = await res.json();
         availableDevicesList = data.devices || [];
+        wifiCamerasList = data.wifi_cameras || [];
         currentCameraMapping = data.current_mapping || {};
 
         CAMERAS.forEach(cam => {
             const selectEl = document.getElementById('selectSrc' + capitalize(cam));
             if (!selectEl) return;
 
+            // If user has focused this dropdown, don't clobber it while they are selecting
+            if (document.activeElement === selectEl) return;
+
             const assignedSource = (currentCameraMapping[cam] && currentCameraMapping[cam].source !== undefined)
                 ? String(currentCameraMapping[cam].source)
                 : '';
 
-            // Build options for live cameras
-            let optsHtml = '<optgroup label="Select Live Camera">';
-            availableDevicesList.forEach(dev => {
+            // Group 1: Hardware USB / Integrated cameras (Connected first)
+            let optsHtml = '<optgroup label="Physical USB & Webcams (Select Any)">';
+            const sortedDevs = [...availableDevicesList].sort((a, b) => (b.connected ? 1 : 0) - (a.connected ? 1 : 0));
+            sortedDevs.forEach(dev => {
                 const isSelected = (assignedSource === dev.id || assignedSource === String(dev.index));
                 const badge = dev.connected ? '🟢 ' : '🔴 ';
                 const statusSuffix = dev.connected ? ' (LIVE CONNECTED)' : ' (NO SIGNAL)';
@@ -38,7 +45,25 @@ async function loadAvailableCameras(forceRefresh = false) {
             });
             optsHtml += '</optgroup>';
 
+            // Group 2: WiFi & Network IP cameras
+            if (wifiCamerasList && wifiCamerasList.length > 0) {
+                optsHtml += '<optgroup label="WiFi / Network IP Cameras">';
+                wifiCamerasList.forEach(w => {
+                    const isSelected = (assignedSource === w.url || assignedSource === w.id);
+                    optsHtml += `<option value="${w.url}" ${isSelected ? 'selected' : ''}>📡 ${w.name} (${w.url})</option>`;
+                });
+                optsHtml += '</optgroup>';
+            }
+
+            // Group 3: Add Camera Option
+            optsHtml += '<optgroup label="Add New Camera">';
+            optsHtml += '<option value="__add_wifi__">➕ Add WiFi / IP Camera (RTSP/HTTP)...</option>';
+            optsHtml += '</optgroup>';
+
             selectEl.innerHTML = optsHtml;
+            if (assignedSource) {
+                selectEl.value = assignedSource;
+            }
 
             // Update assigned text label
             updateScreenAssignedBadge(cam, assignedSource);
@@ -52,12 +77,26 @@ async function loadAvailableCameras(forceRefresh = false) {
     }
 }
 
+let cameraPollInterval = null;
+function startCameraAutoDiscovery() {
+    if (cameraPollInterval) clearInterval(cameraPollInterval);
+    cameraPollInterval = setInterval(() => {
+        const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+        if (activeTag !== 'select') {
+            loadAvailableCameras(false);
+        }
+    }, 7000);
+}
+
 function updateScreenAssignedBadge(cam, source) {
     const badgeEl = document.getElementById('assignedLabel' + capitalize(cam));
     if (!badgeEl) return;
 
     if (!source || source.startsWith('video') || source.endsWith('.mp4')) {
         badgeEl.textContent = `Assigned: Demo File (${cam}.mp4)`;
+    } else if (source.startsWith('http://') || source.startsWith('https://') || source.startsWith('rtsp://')) {
+        const w = wifiCamerasList.find(c => c.url === source);
+        badgeEl.textContent = `Assigned: 📡 ${w ? w.name : 'WiFi Camera'}`;
     } else {
         const dev = availableDevicesList.find(d => d.id === String(source));
         const devName = dev ? dev.label : `Camera ${source}`;
@@ -66,6 +105,15 @@ function updateScreenAssignedBadge(cam, source) {
 }
 
 async function assignScreenCamera(screen, source) {
+    if (source === '__add_wifi__') {
+        openWifiModal(screen);
+        const currentSrc = (currentCameraMapping[screen] && currentCameraMapping[screen].source !== undefined)
+            ? String(currentCameraMapping[screen].source)
+            : '';
+        const sel = document.getElementById('selectSrc' + capitalize(screen));
+        if (sel) sel.value = currentSrc;
+        return;
+    }
     try {
         const res = await fetch('/api/cameras/assign', {
             method: 'POST',
@@ -74,6 +122,7 @@ async function assignScreenCamera(screen, source) {
         });
         const data = await res.json();
         if (data.success) {
+            currentCameraMapping[screen] = { source, connected: true };
             updateScreenAssignedBadge(screen, source);
             // Reload stream immediately on that screen box
             const img = document.getElementById('feed' + capitalize(screen));
@@ -83,6 +132,51 @@ async function assignScreenCamera(screen, source) {
         }
     } catch (e) {
         console.error('Assign camera error:', e);
+    }
+}
+
+function openWifiModal(forScreen = null) {
+    pendingWifiScreenTarget = forScreen;
+    const m = document.getElementById('wifiModal');
+    if (m) m.style.display = 'flex';
+}
+
+function closeWifiModal() {
+    const m = document.getElementById('wifiModal');
+    if (m) m.style.display = 'none';
+    pendingWifiScreenTarget = null;
+}
+
+async function submitAddWifiCam() {
+    const nameInput = document.getElementById('wifiCamName');
+    const urlInput = document.getElementById('wifiCamUrl');
+    const name = nameInput ? nameInput.value.trim() : '';
+    const url = urlInput ? urlInput.value.trim() : '';
+    if (!url) {
+        alert('Please enter a camera stream URL (e.g. http://192.168.1.50:8080/video or rtsp://...)');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/cameras/wifi/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name || 'WiFi Camera', url })
+        });
+        const data = await res.json();
+        if (data.success) {
+            closeWifiModal();
+            if (nameInput) nameInput.value = '';
+            if (urlInput) urlInput.value = '';
+            await loadAvailableCameras(true);
+            if (pendingWifiScreenTarget) {
+                await assignScreenCamera(pendingWifiScreenTarget, url);
+            }
+        } else {
+            alert('Failed to add WiFi camera: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Error adding wifi camera:', e);
     }
 }
 
@@ -145,6 +239,7 @@ async function changeCaptureDelay(val) {
 document.addEventListener('DOMContentLoaded', async () => {
     // 1. Load available cameras and assign screen pickers
     await loadAvailableCameras(false);
+    startCameraAutoDiscovery();
 
     // 2. Load capture delay setting
     try {

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 _cached_cameras: List[Dict[str, Any]] = []
 _cache_timestamp: float = 0.0
 _cache_lock = threading.Lock()
-CACHE_TTL = 60.0  # seconds
+CACHE_TTL = 10.0  # seconds (quick auto-detection of USB cameras)
 
 def probe_hardware_cameras(max_devices: int = 6, currently_open_indices: set = None) -> List[Dict[str, Any]]:
     """
@@ -110,8 +110,17 @@ def get_available_cameras(video_sources: dict = None, force_refresh: bool = Fals
                 "is_device": False,
             })
 
+    # WiFi & IP Camera options
+    try:
+        from config import load_config
+        cfg = load_config()
+        wifi_cameras = cfg.get("wifi_cameras", [])
+    except Exception:
+        wifi_cameras = []
+
     return {
         "devices": devices,
+        "wifi_cameras": wifi_cameras,
         "videos": videos,
         "cached": not force_refresh,
     }

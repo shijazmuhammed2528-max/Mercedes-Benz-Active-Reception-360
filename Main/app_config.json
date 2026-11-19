@@ -1,7 +1,7 @@
 {
   "yolo_model": "yolov8n.pt",
   "yolo_confidence": 0.35,
-  "yolo_process_fps": 8,
+  "yolo_process_fps": 30,
   "yolo_inference_size": 640,
   "stationary_duration": 2,
   "capture_delay_seconds": 1,
@@ -11,13 +11,14 @@
   "min_detection_ratio": 0.05,
   "min_sharpness": 30,
   "capture_cooldown": 5,
-  "device": "auto",
+  "device": "cuda",
   "video_dir": "D:\\Project Costal star\\Videos",
   "database_dir": "D:\\Project Costal star\\Data_base",
   "camera_sources": {
     "front": "0",
-    "back": "1",
-    "left": "2",
-    "right": "3"
-  }
+    "back": "0",
+    "left": "0",
+    "right": "0"
+  },
+  "wifi_cameras": []
 }
