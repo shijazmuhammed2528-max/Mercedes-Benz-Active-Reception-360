@@ -456,8 +456,9 @@ class CaptureController:
                     all_detected = False
                     continue
 
-                # If camera device is not connected, skip YOLO and show clean NO SIGNAL frame
-                if not cam.is_connected:
+                # If camera device is not connected AND it's a hardware device (not video file),
+                # show NO SIGNAL and skip YOLO for that camera
+                if not cam.is_connected and cam._is_device_source():
                     cam.detection = None
                     cam.is_detected = False
                     cam.confidence = 0.0

@@ -154,13 +154,20 @@ def process_single_media(file_bytes: bytes, filename: str, camera_view: str, yol
 
     # Create annotated preview with Mercedes-Benz green bounding box (#00FF66)
     annotated = clean_frame.copy()
+    ah, aw = annotated.shape[:2]
     if best_det:
-        x1, y1, x2, y2 = best_det["bbox"]
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 102), 3)
-        cls_label = f"{best_det.get('class_name', 'CAR').upper()} {int(best_det['confidence'] * 100)}%"
-        cv2.rectangle(annotated, (x1, max(0, y1 - 32)), (x1 + len(cls_label) * 14 + 16, y1), (0, 0, 0), -1)
-        cv2.putText(annotated, cls_label, (x1 + 8, max(22, y1 - 8)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 102), 2)
+        bx1, by1, bx2, by2 = best_det["bbox"]
+        x1 = max(0, min(aw - 1, int(bx1)))
+        y1 = max(0, min(ah - 1, int(by1)))
+        x2 = max(0, min(aw - 1, int(bx2)))
+        y2 = max(0, min(ah - 1, int(by2)))
+        if x2 > x1 and y2 > y1:
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 102), 3)
+            cls_label = f"{best_det.get('class_name', 'CAR').upper()} {int(best_det['confidence'] * 100)}%"
+            box_w = min(aw - x1, len(cls_label) * 14 + 16)
+            cv2.rectangle(annotated, (x1, max(0, y1 - 32)), (x1 + box_w, y1), (0, 0, 0), -1)
+            cv2.putText(annotated, cls_label, (x1 + 8, max(22, y1 - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 102), 2)
 
     # Plate recognition (especially useful for front and rear views)
     plate_text = ""
@@ -389,9 +396,23 @@ def process_multi_vehicle_media(
 
     # Strip clean_frame numpy arrays before JSON serialization
     serialized_cams = {}
-    for cam, cinfo in results_by_cam.items():
+    for cam in ["front", "back", "left", "right"]:
+        cinfo = results_by_cam.get(cam, {})
         copy_info = dict(cinfo)
         copy_info.pop("clean_frame", None)
+        # Ensure required fields are always present for the UI modal
+        if "is_video" not in copy_info:
+            copy_info["is_video"] = False
+        if "duration_seconds" not in copy_info:
+            copy_info["duration_seconds"] = 0
+        if "vehicle_detected" not in copy_info:
+            copy_info["vehicle_detected"] = False
+        if "detection" not in copy_info or copy_info["detection"] is None:
+            copy_info["detection"] = {"confidence": 0.0, "class_name": "car"}
+        if "sharpness" not in copy_info:
+            copy_info["sharpness"] = sharpness_scores.get(cam, 0.0)
+        if "preview_b64" not in copy_info:
+            copy_info["preview_b64"] = ""
         serialized_cams[cam] = copy_info
 
     return {
